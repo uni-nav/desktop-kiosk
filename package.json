@@ -1,0 +1,58 @@
+{
+    "name": "university-kiosk",
+    "version": "1.0.0",
+    "description": "Universitet navigatsiya kiosk ilovasi",
+    "main": "dist/main/main.js",
+    "scripts": {
+        "start": "npm run build && electron .",
+        "dev": "concurrently \"npm run watch:main\" \"npm run watch:renderer\" \"wait-on dist/main/main.js && electron .\"",
+        "build": "npm run build:main && npm run build:renderer",
+        "build:main": "tsc -p tsconfig.main.json",
+        "build:renderer": "tsc -p tsconfig.renderer.json && cp src/renderer/*.html dist/renderer/ && cp src/renderer/*.css dist/renderer/",
+        "watch:main": "tsc -p tsconfig.main.json --watch",
+        "watch:renderer": "tsc -p tsconfig.renderer.json --watch",
+        "pack": "electron-builder --dir",
+        "dist": "electron-builder",
+        "dist:mac": "electron-builder --mac",
+        "dist:win": "electron-builder --win",
+        "dist:linux": "electron-builder --linux"
+    },
+    "build": {
+        "appId": "uz.university.kiosk",
+        "productName": "Universitet Kiosk",
+        "directories": {
+            "output": "release"
+        },
+        "files": [
+            "dist/**/*",
+            "node_modules/**/*"
+        ],
+        "mac": {
+            "target": "dmg",
+            "icon": "assets/icon.icns"
+        },
+        "win": {
+            "target": "nsis",
+            "icon": "assets/icon.ico"
+        },
+        "linux": {
+            "target": "AppImage",
+            "icon": "assets/icon.png"
+        }
+    },
+    "dependencies": {
+        "axios": "^1.6.7",
+        "dotenv": "^17.2.3",
+        "electron-log": "^5.4.3",
+        "sql.js": "^1.10.2"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.16",
+        "@types/sql.js": "^1.4.9",
+        "concurrently": "^8.2.2",
+        "electron": "^28.2.1",
+        "electron-builder": "^24.9.1",
+        "typescript": "^5.3.3",
+        "wait-on": "^7.2.0"
+    }
+}

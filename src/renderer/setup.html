@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="uz">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiosk Sozlamalari</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0f172a;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        .setup-card {
+            background: #1e293b;
+            padding: 2rem;
+            border-radius: 1rem;
+            width: 400px;
+            box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1);
+            border: 1px solid #334155;
+        }
+
+        .logo {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+
+        .title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            text-align: center;
+            color: #94a3b8;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: #cbd5e1;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 0.5rem;
+            color: white;
+            font-size: 1rem;
+            box-sizing: border-box;
+            transition: all 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px #3b82f6;
+        }
+
+        button {
+            width: 100%;
+            padding: 0.875rem;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button:disabled {
+            background: #475569;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .status {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            font-size: 0.875rem;
+        }
+
+        .status.error {
+            background: #450a0a;
+            color: #fca5a5;
+            border: 1px solid #7f1d1d;
+        }
+
+        .status.success {
+            background: #052e16;
+            color: #86efac;
+            border: 1px solid #14532d;
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #fff;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .checkbox-group input {
+            width: auto;
+            margin-right: 0.5rem;
+        }
+
+        .checkbox-group label {
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="setup-card">
+        <div class="logo">🏫</div>
+        <div class="title">Kioskni Sozlash</div>
+
+        <div class="form-group">
+            <label for="api-url">Server Manzili (API URL)</label>
+            <input type="url" id="api-url" placeholder="http://192.168.1.100:8000" value="http://127.0.0.1:8000">
+        </div>
+
+        <div class="form-group">
+            <label for="kiosk-id">Kiosk ID</label>
+            <input type="number" id="kiosk-id" placeholder="1" min="1">
+        </div>
+
+        <div class="form-group">
+            <label for="idle-timeout">Harakatsizlik vaqti (ms)</label>
+            <input type="number" id="idle-timeout" placeholder="300000" value="300000" step="1000">
+        </div>
+
+        <div class="form-group">
+            <label for="animation-loops">Animatsiya aylanishlar soni</label>
+            <input type="number" id="animation-loops" placeholder="3" value="3" min="1">
+        </div>
+
+        <div class="checkbox-group">
+            <input type="checkbox" id="auto-fullscreen">
+            <label for="auto-fullscreen">Avtomatik To'liq Ekran (Fullscreen)</label>
+        </div>
+
+        <div class="checkbox-group">
+            <input type="checkbox" id="kiosk-mode">
+            <label for="kiosk-mode">Kiosk Rejimi (Bloklangan)</label>
+        </div>
+
+        <div class="checkbox-group">
+            <input type="checkbox" id="debug-mode">
+            <label for="debug-mode">Debug Rejimi (Loglar)</label>
+        </div>
+
+        <button id="save-btn">
+            <div id="spinner" class="spinner hidden"></div>
+            <span id="btn-text">Saqlash va Boshlash</span>
+        </button>
+
+        <div id="status-msg" class="status hidden"></div>
+    </div>
+    <script type="module" src="setup.js"></script>
+</body>
+
+</html>

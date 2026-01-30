@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="uz">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kiosk - Tanlash</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="launcher-container">
+        <header class="launcher-header">
+            <h1>🏫 Universitet Navigatsiya</h1>
+            <p class="subtitle">Kiosk tanlang</p>
+            <div id="status-bar" class="status-bar">
+                <span id="status-indicator" class="status-indicator offline"></span>
+                <span id="status-text">Tekshirilmoqda...</span>
+                <button id="sync-btn" class="sync-btn" title="Yangilash">🔄</button>
+            </div>
+        </header>
+
+        <main class="kiosk-grid" id="kiosk-grid">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Yuklanmoqda...</p>
+            </div>
+        </main>
+
+        <footer class="launcher-footer">
+            <button id="fullscreen-btn" class="footer-btn">⛶ To'liq ekran</button>
+        </footer>
+    </div>
+
+    <script type="module" src="launcher.js"></script>
+</body>
+
+</html>

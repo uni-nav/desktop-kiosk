@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="uz">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reklama</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            background: transparent;
+            font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+            overflow: hidden;
+        }
+
+        .ad-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+            text-align: center;
+        }
+
+        /* =====================================================
+           REKLAMANI BU YERDA O'ZGARTIRING
+           Quyidagi seksiyalardan birini o'zgartiring:
+           - .ad-text - matnli reklama uchun
+           - .ad-image - rasmli reklama uchun
+           ===================================================== */
+
+        .ad-text {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .ad-text h3 {
+            color: #2dd4bf;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        .ad-text p {
+            margin-bottom: 6px;
+        }
+
+        .ad-text a {
+            color: #60a5fa;
+            text-decoration: none;
+        }
+
+        .ad-text a:hover {
+            text-decoration: underline;
+        }
+
+        .ad-image img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        /* Placeholder uchun */
+        .placeholder {
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="ad-container">
+        <!-- =========================================
+             REKLAMA KONTENTI BU YERDA
+             
+             MATNLI REKLAMA UCHUN:
+             <div class="ad-text">
+                 <h3>Sizning Reklama</h3>
+                 <p>Tavsif matni</p>
+                 <a href="#">Batafsil</a>
+             </div>
+             
+             RASMLI REKLAMA UCHUN:
+             <div class="ad-image">
+                 <img src="reklama-rasm.jpg" alt="Reklama">
+             </div>
+             
+             ========================================= -->
+
+        <!-- Hozirgi placeholder - O'ZGARTIRISHINGIZ MUMKIN -->
+        <div class="ad-text">
+            <h3>🎓 Universitet Navigatsiya</h3>
+            <p>Yo'nalishingizni oson toping!</p>
+            <p class="placeholder">Reklama joylash uchun reklama.html faylini tahrirlang</p>
+        </div>
+    </div>
+</body>
+
+</html>

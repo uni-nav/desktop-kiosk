@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="uz">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navigatsiya</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="kiosk-container">
+        <!-- Header -->
+        <header class="kiosk-header">
+            <button id="back-btn" class="back-btn">← Orqaga</button>
+            <h1 id="kiosk-name">Kiosk</h1>
+            <div class="header-right">
+                <span id="status-indicator" class="status-indicator"></span>
+                <button id="sync-btn" class="icon-btn" title="Yangilash">🔄</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Sidebar -->
+            <aside class="sidebar">
+                <!-- Filter Section -->
+                <div class="sidebar-section filter-section">
+                    <div class="section-header">🔍 Qidirish</div>
+                    <div class="search-field">
+                        <input type="text" id="search-input" placeholder="Xona nomi..." autocomplete="off">
+                        <div id="search-results" class="search-results hidden"></div>
+
+                        <!-- Virtual Keyboard -->
+                        <div id="virtual-keyboard" class="virtual-keyboard hidden"></div>
+                    </div>
+                    <div id="selected-destination" class="selected-room hidden">
+                        <span id="destination-name"></span>
+                        <button id="clear-destination" class="clear-btn">✕</button>
+                    </div>
+                    <button id="navigate-btn" class="navigate-btn" disabled>🧭 Yo'l ko'rsatish</button>
+
+                    <!-- Path Info (moved here) -->
+                    <div id="path-info" class="path-info-compact hidden">
+                        <div class="path-stats-compact">
+                            <span>📏 <span id="distance">0</span>m</span>
+                            <span>⏱️ <span id="time">0</span>daq</span>
+                            <span id="floor-changes-container" class="hidden">🪜 <span
+                                    id="floor-changes">0</span></span>
+                        </div>
+                        <button id="clear-path" class="clear-path-btn-compact">✕</button>
+                    </div>
+                </div>
+
+                <!-- Text Directions Section -->
+                <div class="sidebar-section directions-section">
+                    <div class="section-header">📝 Yo'l ko'rsatmasi</div>
+                    <div id="directions-list" class="directions-list">
+                        <div class="empty-directions">Xona tanlang va yo'l qidiring</div>
+                    </div>
+                </div>
+
+                <!-- Ads Section -->
+                <div class="sidebar-section ads-section">
+                    <div class="section-header">📢 Reklama</div>
+                    <iframe id="ads-frame" src="reklama.html" frameborder="0"></iframe>
+                </div>
+
+                <!-- Floor Tabs -->
+                <nav id="floor-tabs" class="floor-tabs-sidebar"></nav>
+            </aside>
+
+            <!-- Map Container -->
+            <main class="map-container">
+                <canvas id="map-canvas"></canvas>
+                <div id="map-loading" class="map-loading hidden">
+                    <div class="spinner"></div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Welcome Modal -->
+        <div id="welcome-modal" class="modal-overlay">
+            <div class="modal-content">
+                <h2>Xush kelibsiz!</h2>
+                <p>Yo'l topish uchun ekranga teging</p>
+                <button id="start-btn" class="modal-btn primary">Boshlash</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="kiosk.js"></script>
+</body>
+
+</html>
