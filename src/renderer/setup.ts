@@ -1,18 +1,13 @@
 /// <reference path="./types.d.ts" />
 
-interface SetupAPI {
-    checkConnection: (url: string) => Promise<boolean>;
-    saveAndRestart: (apiUrl: string, kioskId: number) => Promise<void>;
-}
-
-declare global {
-    interface Window {
-        setupAPI: SetupAPI;
-    }
-}
-
 const apiUrlInput = document.getElementById('api-url') as HTMLInputElement;
 const kioskIdInput = document.getElementById('kiosk-id') as HTMLInputElement;
+const idleTimeoutInput = document.getElementById('idle-timeout') as HTMLInputElement;
+const animationLoopsInput = document.getElementById('animation-loops') as HTMLInputElement;
+const autoFullscreenInput = document.getElementById('auto-fullscreen') as HTMLInputElement;
+const kioskModeInput = document.getElementById('kiosk-mode') as HTMLInputElement;
+const debugModeInput = document.getElementById('debug-mode') as HTMLInputElement;
+
 const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
 const btnText = document.getElementById('btn-text') as HTMLSpanElement;
 const statusMsg = document.getElementById('status-msg') as HTMLDivElement;
@@ -21,18 +16,31 @@ const spinner = document.getElementById('spinner') as HTMLDivElement;
 console.log('Setup script loaded');
 
 // Check API availability
-if (!window.setupAPI) {
-    console.error('CRITICAL: window.setupAPI is undefined');
+if (typeof setupAPI === 'undefined') {
+    console.error('CRITICAL: setupAPI is undefined');
     showError('SetupAPI yuklanmadi. Dasturni qayta o\'rnating.');
 }
 
 saveBtn.addEventListener('click', async () => {
     console.log('Save button clicked');
-    const apiUrl = apiUrlInput.value.trim();
+    const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
     const kioskId = parseInt(kioskIdInput.value.trim());
+    const idleTimeout = parseInt(idleTimeoutInput.value.trim() || '300000');
+    const animationLoops = parseInt(animationLoopsInput.value.trim() || '3');
+    const autoFullscreen = autoFullscreenInput.checked;
+    const kioskMode = kioskModeInput.checked;
+    const debugMode = debugModeInput.checked;
 
     if (!apiUrl || isNaN(kioskId) || kioskId < 1) {
         showError('Iltimos, server manzili va Kiosk ID (raqam) ni to\'g\'ri kiriting');
+        return;
+    }
+    if (!Number.isFinite(idleTimeout) || idleTimeout < 10000) {
+        showError('Harakatsizlik vaqti (ms) kamida 10000 bo‘lishi kerak');
+        return;
+    }
+    if (!Number.isFinite(animationLoops) || animationLoops < 1) {
+        showError('Animatsiya aylanishlar soni kamida 1 bo‘lishi kerak');
         return;
     }
 
@@ -40,7 +48,7 @@ saveBtn.addEventListener('click', async () => {
 
     try {
         console.log(`Checking connection to: ${apiUrl}`);
-        const isConnected = await window.setupAPI.checkConnection(apiUrl);
+        const isConnected = await setupAPI.checkConnection(apiUrl);
 
         if (!isConnected) {
             showError('Serverga ulanib bo\'lmadi. Manzilni tekshiring yoki server ishlayotganiga ishonch hosil qiling.');
@@ -53,7 +61,15 @@ saveBtn.addEventListener('click', async () => {
         // Wait a moment for UX
         await new Promise(resolve => setTimeout(resolve, 800));
 
-        await window.setupAPI.saveAndRestart(apiUrl, kioskId);
+        await setupAPI.saveAndRestart(
+            apiUrl,
+            kioskId,
+            kioskMode,
+            autoFullscreen,
+            idleTimeout,
+            animationLoops,
+            debugMode
+        );
     } catch (error) {
         console.error(error);
         showError('Xatolik: ' + String(error));

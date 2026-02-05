@@ -8,6 +8,7 @@ interface Floor {
     image_url: string | null;
     image_width: number | null;
     image_height: number | null;
+    local_image_path?: string | null;
 }
 
 interface Waypoint {
@@ -50,8 +51,8 @@ interface FloorRun {
 
 // Constants
 const ANIMATION_SPEED = 70; // px per second
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_ANIMATION_LOOPS = 3;
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const DEFAULT_ANIMATION_LOOPS = 3;
 
 class KioskApp {
     private canvas: HTMLCanvasElement;
@@ -86,6 +87,11 @@ class KioskApp {
 
     // Idle timer
     private idleTimer: number | null = null;
+    private idleTimeoutMs: number = DEFAULT_IDLE_TIMEOUT_MS;
+    private maxAnimationLoops: number = DEFAULT_ANIMATION_LOOPS;
+
+    // Concurrency guard for floor loading
+    private floorSelectRequestId: number = 0;
 
     constructor() {
         this.canvas = document.getElementById('map-canvas') as HTMLCanvasElement;
@@ -106,6 +112,19 @@ class KioskApp {
 
         // Get API URL
         this.apiBaseUrl = await kioskAPI.getApiUrl();
+
+        // Load settings (idle timeout, animation loops)
+        try {
+            const settings = await kioskAPI.getSettings();
+            if (Number.isFinite(settings.IDLE_TIMEOUT_MS) && settings.IDLE_TIMEOUT_MS > 0) {
+                this.idleTimeoutMs = settings.IDLE_TIMEOUT_MS;
+            }
+            if (Number.isFinite(settings.ANIMATION_LOOPS) && settings.ANIMATION_LOOPS > 0) {
+                this.maxAnimationLoops = settings.ANIMATION_LOOPS;
+            }
+        } catch {
+            // ignore settings errors
+        }
 
         // Load kiosk info
         const kiosk = await kioskAPI.getKiosk(this.kioskId);
@@ -138,20 +157,16 @@ class KioskApp {
 
 
 
-        // Back button
-        document.getElementById('back-btn')!.addEventListener('click', () => {
-            kioskAPI.backToLauncher();
-        });
-
-        // Sync button
-        document.getElementById('sync-btn')!.addEventListener('click', () => {
-            this.syncData();
-        });
+        // (Kiosk screen) Back/sync buttons removed intentionally to lock the kiosk session.
 
         // Search
         const searchInput = document.getElementById('search-input') as HTMLInputElement;
         searchInput.addEventListener('input', (e) => {
             this.handleSearch((e.target as HTMLInputElement).value);
+            this.resetIdleTimer();
+        });
+        searchInput.addEventListener('virtual-enter', () => {
+            this.handleSearchEnter();
             this.resetIdleTimer();
         });
         searchInput.addEventListener('focus', () => {
@@ -202,7 +217,7 @@ class KioskApp {
         }
         this.idleTimer = window.setTimeout(() => {
             this.handleIdleTimeout();
-        }, IDLE_TIMEOUT_MS);
+        }, this.idleTimeoutMs);
     }
 
     handleIdleTimeout() {
@@ -253,10 +268,13 @@ class KioskApp {
     async updateOnlineStatus() {
         try {
             const online = await kioskAPI.checkOnline();
-            const indicator = document.getElementById('status-indicator')!;
+            const indicator = document.getElementById('status-indicator');
+            if (!indicator) return;
             indicator.className = `status-indicator ${online ? 'online' : 'offline'}`;
         } catch {
-            document.getElementById('status-indicator')!.className = 'status-indicator offline';
+            const indicator = document.getElementById('status-indicator');
+            if (!indicator) return;
+            indicator.className = 'status-indicator offline';
         }
     }
 
@@ -290,6 +308,7 @@ class KioskApp {
     }
 
     async selectFloor(floor: Floor) {
+        const requestId = ++this.floorSelectRequestId;
         this.currentFloor = floor;
         this.renderFloorTabs();
 
@@ -297,11 +316,14 @@ class KioskApp {
         document.getElementById('map-loading')!.classList.remove('hidden');
 
         // Load floor data
-        this.waypoints = await kioskAPI.getWaypoints(floor.id);
+        const waypoints = await kioskAPI.getWaypoints(floor.id);
+        if (requestId !== this.floorSelectRequestId) return;
+        this.waypoints = waypoints;
         this.waypointsByFloor.set(floor.id, this.waypoints);
 
         // Load floor image
         await this.loadFloorImage(floor);
+        if (requestId !== this.floorSelectRequestId) return;
 
         // Hide loading
         document.getElementById('map-loading')!.classList.add('hidden');
@@ -311,6 +333,22 @@ class KioskApp {
     }
 
     async loadFloorImage(floor: Floor): Promise<void> {
+        const localPath = (floor.local_image_path || '').trim();
+        if (localPath) {
+            // Check cache
+            if (this.floorImages.has(floor.id)) return;
+            const fileUrl = this.toFileUrl(localPath);
+            return new Promise<void>((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    this.floorImages.set(floor.id, img);
+                    resolve();
+                };
+                img.onerror = () => resolve();
+                img.src = fileUrl;
+            });
+        }
+
         if (!floor.image_url) {
             return;
         }
@@ -322,7 +360,7 @@ class KioskApp {
 
         const imageUrl = floor.image_url.startsWith('http')
             ? floor.image_url
-            : `${this.apiBaseUrl}${floor.image_url}`;
+            : `${this.apiBaseUrl}${floor.image_url.startsWith('/') ? '' : '/'}${floor.image_url}`;
 
         return new Promise<void>((resolve) => {
             const img = new Image();
@@ -336,6 +374,12 @@ class KioskApp {
             };
             img.src = imageUrl;
         });
+    }
+
+    private toFileUrl(filePath: string): string {
+        const normalized = filePath.replace(/\\/g, '/');
+        const prefix = /^[A-Za-z]:\//.test(normalized) ? 'file:///' : 'file://';
+        return encodeURI(`${prefix}${normalized}`);
     }
 
     async handleSearch(query: string) {
@@ -373,6 +417,20 @@ class KioskApp {
         }
 
         resultsContainer.classList.remove('hidden');
+    }
+
+    private handleSearchEnter() {
+        const resultsContainer = document.getElementById('search-results');
+        const first = resultsContainer?.querySelector<HTMLElement>('.search-result-item[data-room-id]');
+        if (first) {
+            first.click();
+            return;
+        }
+
+        const navigateBtn = document.getElementById('navigate-btn') as HTMLButtonElement | null;
+        if (navigateBtn && !navigateBtn.disabled) {
+            navigateBtn.click();
+        }
     }
 
     selectRoom(room: Room) {
@@ -552,8 +610,8 @@ class KioskApp {
     }
 
     async syncData() {
-        const syncBtn = document.getElementById('sync-btn') as HTMLButtonElement;
-        syncBtn.disabled = true;
+        const syncBtn = document.getElementById('sync-btn') as HTMLButtonElement | null;
+        if (syncBtn) syncBtn.disabled = true;
 
         try {
             const result = await kioskAPI.syncData();
@@ -569,7 +627,7 @@ class KioskApp {
         } catch (error) {
             console.error('Sync error:', error);
         } finally {
-            syncBtn.disabled = false;
+            if (syncBtn) syncBtn.disabled = false;
         }
     }
 
@@ -689,7 +747,7 @@ class KioskApp {
                         // All floors done, increment loop count
                         this.animationLoopCount++;
 
-                        if (this.animationLoopCount < MAX_ANIMATION_LOOPS) {
+                        if (this.animationLoopCount < this.maxAnimationLoops) {
                             // Restart animation from beginning
                             this.activeRunIndex = 0;
                             this.animationProgress = 0;
@@ -867,7 +925,7 @@ class VirtualKeyboard {
         ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
         ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
         ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
-        ['Z', 'X', 'C', 'V', 'B', 'N', 'M', '⌫'],
+        ['Z', 'X', 'C', 'V', 'B', 'N', 'M', '⌫', '⏎'],
         ['SPACE']
     ];
 
@@ -898,7 +956,7 @@ class VirtualKeyboard {
                 if (key === 'SPACE') {
                     btn.classList.add('space');
                     btn.innerHTML = '&nbsp;'; // Non-breaking space for height
-                } else if (key === '⌫') {
+                } else if (key === '⌫' || key === '⏎') {
                     btn.classList.add('special');
                 }
 
@@ -950,6 +1008,10 @@ class VirtualKeyboard {
             const newVal = currentVal.slice(0, cursorPos) + ' ' + currentVal.slice(cursorPos);
             this.input.value = newVal;
             this.setCursor(cursorPos + 1);
+        } else if (key === '⏎') {
+            // "Enter" triggers room selection / navigation
+            this.input.dispatchEvent(new CustomEvent('virtual-enter', { bubbles: true }));
+            return;
         } else {
             const char = key.toLowerCase(); // Type in lowercase usually but search handles case
             const newVal = currentVal.slice(0, cursorPos) + char + currentVal.slice(cursorPos);

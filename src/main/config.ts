@@ -4,9 +4,33 @@ import * as fs from 'fs';
 import { app } from 'electron';
 import { logger } from './logger';
 
+const normalizeApiUrl = (raw: string): string => {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) return defaults.API_URL;
+    let url = trimmed;
+    if (!/^https?:\/\//i.test(url)) {
+        url = `http://${url}`;
+    }
+    url = url.replace(/\/+$/, '');
+    url = url.replace(/\/api$/i, '');
+    return url;
+};
+
+const parseIntOrDefault = (raw: string, fallback: number): number => {
+    const n = parseInt(String(raw), 10);
+    return Number.isFinite(n) ? n : fallback;
+};
+
+const parseBool = (raw: string, fallback: boolean): boolean => {
+    const s = String(raw);
+    if (s === 'true') return true;
+    if (s === 'false') return false;
+    return fallback;
+};
+
 // Default values
 const defaults = {
-    API_URL: 'http://127.0.0.1:8000',
+    API_URL: 'http://54.160.198.4:8000',
     KIOSK_ID: '0',
     KIOSK_MODE: 'false',
     AUTO_FULLSCREEN: 'false',
@@ -75,14 +99,14 @@ export function loadConfig(): Config {
 
     // Parse config
     config = {
-        API_URL: values.API_URL,
-        KIOSK_ID: parseInt(values.KIOSK_ID, 10),
-        KIOSK_MODE: values.KIOSK_MODE === 'true',
-        AUTO_FULLSCREEN: values.AUTO_FULLSCREEN === 'true',
-        IDLE_TIMEOUT_MS: parseInt(values.IDLE_TIMEOUT_MS, 10),
-        ANIMATION_LOOPS: parseInt(values.ANIMATION_LOOPS, 10),
-        DEBUG_MODE: String(values.DEBUG_MODE) === 'true',
-        SETUP_COMPLETED: String(values.SETUP_COMPLETED) === 'true'
+        API_URL: normalizeApiUrl(values.API_URL),
+        KIOSK_ID: parseIntOrDefault(values.KIOSK_ID, parseIntOrDefault(defaults.KIOSK_ID, 0)),
+        KIOSK_MODE: parseBool(values.KIOSK_MODE, defaults.KIOSK_MODE === 'true'),
+        AUTO_FULLSCREEN: parseBool(values.AUTO_FULLSCREEN, defaults.AUTO_FULLSCREEN === 'true'),
+        IDLE_TIMEOUT_MS: parseIntOrDefault(values.IDLE_TIMEOUT_MS, parseIntOrDefault(defaults.IDLE_TIMEOUT_MS, 300000)),
+        ANIMATION_LOOPS: parseIntOrDefault(values.ANIMATION_LOOPS, parseIntOrDefault(defaults.ANIMATION_LOOPS, 3)),
+        DEBUG_MODE: parseBool(values.DEBUG_MODE, defaults.DEBUG_MODE === 'true'),
+        SETUP_COMPLETED: parseBool(values.SETUP_COMPLETED, defaults.SETUP_COMPLETED === 'true')
     };
 
     const env = process.env.NODE_ENV || 'development';

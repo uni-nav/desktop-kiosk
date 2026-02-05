@@ -10,6 +10,8 @@ import axios from 'axios';
 let mainWindow: BrowserWindow | null = null;
 let database: Database;
 let apiSync: ApiSync;
+let syncInterval: NodeJS.Timeout | null = null;
+let syncInProgress = false;
 
 // Load config
 const config = loadConfig();
@@ -62,7 +64,9 @@ function createWindow() {
         logger.info('⚠️ [SETUP] Setup not completed, loading wizard...');
         const setupPage = path.join(__dirname, '../renderer/setup.html');
         mainWindow.loadFile(setupPage);
-        mainWindow.webContents.openDevTools(); // DEBUG: Open DevTools for setup
+        if (config.DEBUG_MODE || process.env.NODE_ENV === 'development') {
+            mainWindow.webContents.openDevTools();
+        }
 
         // Setup window settings
         mainWindow.setFullScreen(false);
@@ -102,6 +106,23 @@ async function initialize() {
             logger.sync.failed(err);
         });
 
+        // Periodic auto-sync (best effort). Keeps offline DB fresh when internet exists.
+        const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+        if (syncInterval) clearInterval(syncInterval);
+        syncInterval = setInterval(async () => {
+            if (syncInProgress) return;
+            syncInProgress = true;
+            try {
+                const online = await apiSync.isOnline();
+                if (!online) return;
+                await apiSync.syncAll();
+            } catch (err) {
+                logger.sync.failed(err);
+            } finally {
+                syncInProgress = false;
+            }
+        }, SYNC_INTERVAL_MS);
+
         logger.app.ready();
     } catch (error) {
         logger.app.error('Initialization failed', error);
@@ -122,6 +143,10 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         logger.app.quit();
+        if (syncInterval) {
+            clearInterval(syncInterval);
+            syncInterval = null;
+        }
         app.quit();
     }
 });
@@ -131,7 +156,8 @@ app.on('window-all-closed', () => {
 // Setup Wizard Handlers
 ipcMain.handle('setup-check-connection', async (_, url: string) => {
     try {
-        await axios.get(`${url}/health`, { timeout: 5000 });
+        const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+        await axios.get(`${base}/health`, { timeout: 5000 });
         return true;
     } catch (err) {
         logger.warn(`Setup connection failed: ${err}`);
@@ -140,15 +166,22 @@ ipcMain.handle('setup-check-connection', async (_, url: string) => {
 });
 
 ipcMain.handle('setup-save-config', async (_, apiUrl: string, kioskId: number, kioskMode: boolean, autoFullscreen: boolean, idleTimeout: number, animationLoops: number, debugMode: boolean) => {
-    logger.info(`Saving setup config: URL=${apiUrl}, ID=${kioskId}, Kiosk=${kioskMode}, Full=${autoFullscreen}, Timeout=${idleTimeout}, Anim=${animationLoops}, Debug=${debugMode}`);
+    const normalizedUrl = String(apiUrl || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+    const safeIdleTimeout = Number.isFinite(idleTimeout) && idleTimeout > 0 ? idleTimeout : getConfig().IDLE_TIMEOUT_MS;
+    const safeAnimationLoops = Number.isFinite(animationLoops) && animationLoops > 0 ? animationLoops : getConfig().ANIMATION_LOOPS;
+    const safeKioskId = Number.isFinite(kioskId) && kioskId > 0 ? kioskId : getConfig().KIOSK_ID;
+
+    logger.info(
+        `Saving setup config: URL=${normalizedUrl}, ID=${safeKioskId}, Kiosk=${!!kioskMode}, Full=${!!autoFullscreen}, Timeout=${safeIdleTimeout}, Anim=${safeAnimationLoops}, Debug=${!!debugMode}`
+    );
     saveConfig({
-        API_URL: apiUrl,
-        KIOSK_ID: kioskId,
-        KIOSK_MODE: kioskMode,
-        AUTO_FULLSCREEN: autoFullscreen,
-        IDLE_TIMEOUT_MS: idleTimeout,
-        ANIMATION_LOOPS: animationLoops,
-        DEBUG_MODE: debugMode,
+        API_URL: normalizedUrl,
+        KIOSK_ID: safeKioskId,
+        KIOSK_MODE: !!kioskMode,
+        AUTO_FULLSCREEN: !!autoFullscreen,
+        IDLE_TIMEOUT_MS: safeIdleTimeout,
+        ANIMATION_LOOPS: safeAnimationLoops,
+        DEBUG_MODE: !!debugMode,
         SETUP_COMPLETED: true
     });
     app.relaunch();
@@ -247,7 +280,21 @@ ipcMain.handle('check-online', async () => {
 
 // Get API base URL
 ipcMain.handle('get-api-url', () => {
-    return config.API_URL;
+    return getConfig().API_URL;
+});
+
+ipcMain.handle('get-settings', () => {
+    const current = getConfig();
+    return {
+        API_URL: current.API_URL,
+        KIOSK_ID: current.KIOSK_ID,
+        KIOSK_MODE: current.KIOSK_MODE,
+        AUTO_FULLSCREEN: current.AUTO_FULLSCREEN,
+        IDLE_TIMEOUT_MS: current.IDLE_TIMEOUT_MS,
+        ANIMATION_LOOPS: current.ANIMATION_LOOPS,
+        DEBUG_MODE: current.DEBUG_MODE,
+        SETUP_COMPLETED: current.SETUP_COMPLETED,
+    };
 });
 
 // Navigate to kiosk page

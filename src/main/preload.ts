@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('kioskAPI', {
     syncData: () => ipcRenderer.invoke('sync-data'),
     checkOnline: () => ipcRenderer.invoke('check-online'),
     getApiUrl: () => ipcRenderer.invoke('get-api-url'),
+    getSettings: () => ipcRenderer.invoke('get-settings'),
 
     // Navigation
     openKiosk: (kioskId: number) => ipcRenderer.send('open-kiosk', kioskId),

@@ -11,6 +11,7 @@ export interface Floor {
     image_url: string | null;
     image_width: number | null;
     image_height: number | null;
+    local_image_path?: string | null;
 }
 
 export interface Waypoint {
@@ -66,9 +67,11 @@ export interface NavigationResult {
 export class Database {
     private db: SqlJsDatabase | null = null;
     private dbPath: string;
+    private storageDir: string;
     private initialized: boolean = false;
 
     constructor(userDataPath: string) {
+        this.storageDir = userDataPath;
         this.dbPath = path.join(userDataPath, 'kiosk-data.db');
 
         // Ensure directory exists
@@ -115,6 +118,9 @@ export class Database {
                 image_height INTEGER
             )
         `);
+
+        // Lightweight migrations (keep older DBs working)
+        this.ensureColumn('floors', 'local_image_path', 'TEXT');
 
         this.db.run(`
             CREATE TABLE IF NOT EXISTS waypoints (
@@ -168,12 +174,28 @@ export class Database {
         this.save();
     }
 
+    private ensureColumn(table: string, column: string, columnType: string): void {
+        if (!this.db) return;
+        try {
+            const info = this.db.exec(`PRAGMA table_info(${table})`);
+            const columns = info?.[0]?.values?.map((row) => String(row[1])) || [];
+            if (columns.includes(column)) return;
+            this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${columnType}`);
+        } catch (err) {
+            logger.warn(`DB migration failed for ${table}.${column}: ${err}`);
+        }
+    }
+
     private save() {
         if (!this.db) return;
         const data = this.db.export();
         const buffer = Buffer.from(data);
         fs.writeFileSync(this.dbPath, buffer);
         logger.db.save();
+    }
+
+    getStorageDir(): string {
+        return this.storageDir;
     }
 
     // ==================== FLOORS ====================
@@ -195,13 +217,28 @@ export class Database {
     upsertFloors(floors: Floor[]) {
         if (!this.db) return;
         const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO floors (id, name, floor_number, image_url, image_width, image_height)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO floors (id, name, floor_number, image_url, image_width, image_height, local_image_path)
+            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, (SELECT local_image_path FROM floors WHERE id = ?)))
         `);
         for (const f of floors) {
-            stmt.run([f.id, f.name, f.floor_number, f.image_url, f.image_width, f.image_height]);
+            stmt.run([
+                f.id,
+                f.name,
+                f.floor_number,
+                f.image_url,
+                f.image_width,
+                f.image_height,
+                f.local_image_path ?? null,
+                f.id,
+            ]);
         }
         stmt.free();
+        this.save();
+    }
+
+    setFloorLocalImagePath(floorId: number, localPath: string | null): void {
+        if (!this.db) return;
+        this.db.run('UPDATE floors SET local_image_path = ? WHERE id = ?', [localPath, floorId]);
         this.save();
     }
 
@@ -596,4 +633,3 @@ export class Database {
         return null;
     }
 }
-
