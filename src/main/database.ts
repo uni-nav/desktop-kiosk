@@ -200,6 +200,8 @@ export class Database {
 
     // ==================== FLOORS ====================
 
+    // ==================== FLOORS ====================
+
     getFloors(): Floor[] {
         if (!this.db) return [];
         const result = this.db.exec('SELECT * FROM floors ORDER BY floor_number');
@@ -214,11 +216,35 @@ export class Database {
         return this.mapResults<Floor>(result[0])[0];
     }
 
+    getFloorImagePaths(): Map<number, string> {
+        if (!this.db) return new Map();
+        try {
+            const result = this.db.exec('SELECT id, local_image_path FROM floors WHERE local_image_path IS NOT NULL');
+            if (result.length === 0) return new Map();
+
+            const map = new Map<number, string>();
+            result[0].values.forEach(row => {
+                const id = row[0] as number;
+                const path = row[1] as string;
+                if (id && path) map.set(id, path);
+            });
+            return map;
+        } catch (e) {
+            return new Map();
+        }
+    }
+
+    clearFloors() {
+        if (!this.db) return;
+        this.db.run('DELETE FROM floors');
+        this.save();
+    }
+
     upsertFloors(floors: Floor[]) {
         if (!this.db) return;
         const stmt = this.db.prepare(`
             INSERT OR REPLACE INTO floors (id, name, floor_number, image_url, image_width, image_height, local_image_path)
-            VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, (SELECT local_image_path FROM floors WHERE id = ?)))
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `);
         for (const f of floors) {
             stmt.run([
@@ -228,8 +254,7 @@ export class Database {
                 f.image_url,
                 f.image_width,
                 f.image_height,
-                f.local_image_path ?? null,
-                f.id,
+                f.local_image_path ?? null
             ]);
         }
         stmt.free();
@@ -241,6 +266,8 @@ export class Database {
         this.db.run('UPDATE floors SET local_image_path = ? WHERE id = ?', [localPath, floorId]);
         this.save();
     }
+
+    // ==================== WAYPOINTS ====================
 
     // ==================== WAYPOINTS ====================
 
@@ -258,6 +285,12 @@ export class Database {
         return this.mapResults<Waypoint>(result[0]);
     }
 
+    clearWaypointsByFloor(floorId: number) {
+        if (!this.db) return;
+        this.db.run('DELETE FROM waypoints WHERE floor_id = ?', [floorId]);
+        this.save();
+    }
+
     upsertWaypoints(waypoints: Waypoint[]) {
         if (!this.db) return;
         const stmt = this.db.prepare(`
@@ -273,8 +306,16 @@ export class Database {
 
     // ==================== CONNECTIONS ====================
 
+    // ==================== CONNECTIONS ====================
+
     getConnectionsByFloor(floorId: number): Connection[] {
         if (!this.db) return [];
+        // Connections that belong to waypoints of this floor
+        // Since connections are edges between waypoints, we delete connections 
+        // linked to any waypoint on this floor to avoid orphans.
+        // But wait, connections can be inter-floor? No, usually not in this schema, 
+        // but 'connects_to_waypoint' implies strict graph.
+        // Let's assume connections are primarily stored per floor visualization.
         const result = this.db.exec(`
             SELECT c.* FROM connections c
             WHERE c.from_waypoint_id IN (SELECT id FROM waypoints WHERE floor_id = ?)
@@ -291,6 +332,19 @@ export class Database {
         return this.mapResults<Connection>(result[0]);
     }
 
+    clearConnectionsByFloor(floorId: number) {
+        if (!this.db) return;
+        // Delete connections where EITHER start OR end is on this floor
+        // This is tricky if it deletes inter-floor connections, but usually 
+        // raw connections are purely coordinate-based on the map image.
+        // Inter-floor logic is handled by 'connects_to_waypoint' property of the waypoint itself.
+        this.db.run(`
+            DELETE FROM connections 
+            WHERE from_waypoint_id IN (SELECT id FROM waypoints WHERE floor_id = ?)
+        `, [floorId]);
+        this.save();
+    }
+
     upsertConnections(connections: Connection[]) {
         if (!this.db) return;
         const stmt = this.db.prepare(`
@@ -303,6 +357,8 @@ export class Database {
         stmt.free();
         this.save();
     }
+
+    // ==================== ROOMS ====================
 
     // ==================== ROOMS ====================
 
@@ -330,6 +386,12 @@ export class Database {
         return this.mapResults<Room>(result[0]);
     }
 
+    clearRooms() {
+        if (!this.db) return;
+        this.db.run('DELETE FROM rooms');
+        this.save();
+    }
+
     upsertRooms(rooms: Room[]) {
         if (!this.db) return;
         const stmt = this.db.prepare(`
@@ -342,6 +404,28 @@ export class Database {
         stmt.free();
         this.save();
     }
+
+    cleanupOrphans() {
+        if (!this.db) return;
+
+        // 1. Delete waypoints for non-existent floors
+        this.db.run('DELETE FROM waypoints WHERE floor_id NOT IN (SELECT id FROM floors)');
+
+        // 2. Delete connections where either end point doesn't exist
+        this.db.run('DELETE FROM connections WHERE from_waypoint_id NOT IN (SELECT id FROM waypoints)');
+        this.db.run('DELETE FROM connections WHERE to_waypoint_id NOT IN (SELECT id FROM waypoints)');
+
+        // 3. Delete rooms for non-existent floors
+        this.db.run('DELETE FROM rooms WHERE floor_id IS NOT NULL AND floor_id NOT IN (SELECT id FROM floors)');
+
+        // 4. Delete kiosks for non-existent floors
+        this.db.run('DELETE FROM kiosks WHERE floor_id NOT IN (SELECT id FROM floors)');
+
+        this.save();
+        logger.info('🧹 [DB] Orphaned data cleaned up');
+    }
+
+    // ==================== KIOSKS ====================
 
     // ==================== KIOSKS ====================
 
@@ -357,6 +441,12 @@ export class Database {
         const result = this.db.exec('SELECT * FROM kiosks WHERE id = ?', [id]);
         if (result.length === 0 || result[0].values.length === 0) return undefined;
         return this.mapResults<Kiosk>(result[0])[0];
+    }
+
+    clearKiosks() {
+        if (!this.db) return;
+        this.db.run('DELETE FROM kiosks');
+        this.save();
     }
 
     upsertKiosks(kiosks: Kiosk[]) {

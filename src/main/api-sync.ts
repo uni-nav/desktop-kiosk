@@ -35,31 +35,42 @@ export class ApiSync {
     }
 
     async syncFloors(): Promise<void> {
+        // 1. Fetch data
         const response = await this.client.get('/api/floors/');
-        this.db.upsertFloors(response.data);
-        logger.sync.floors(response.data.length);
+        const newFloors = response.data;
+
+        // 2. Clear table (Fresh Start)
+        this.db.clearFloors();
+
+        // 5. Insert
+        this.db.upsertFloors(newFloors);
+        logger.sync.floors(newFloors.length);
     }
 
     async syncRooms(): Promise<void> {
         const response = await this.client.get('/api/rooms/');
+        this.db.clearRooms();
         this.db.upsertRooms(response.data);
         logger.sync.rooms(response.data.length);
     }
 
     async syncKiosks(): Promise<void> {
         const response = await this.client.get('/api/kiosks/');
+        this.db.clearKiosks();
         this.db.upsertKiosks(response.data);
         logger.sync.kiosks(response.data.length);
     }
 
     async syncWaypointsForFloor(floorId: number): Promise<void> {
         const response = await this.client.get(`/api/waypoints/floor/${floorId}`);
+        this.db.clearWaypointsByFloor(floorId);
         this.db.upsertWaypoints(response.data);
         logger.sync.waypoints(floorId, response.data.length);
     }
 
     async syncConnectionsForFloor(floorId: number): Promise<void> {
         const response = await this.client.get(`/api/waypoints/connections/floor/${floorId}`);
+        this.db.clearConnectionsByFloor(floorId);
         this.db.upsertConnections(response.data);
         logger.sync.connections(floorId, response.data.length);
     }
@@ -89,6 +100,10 @@ export class ApiSync {
 
         // Update sync timestamp
         this.db.setSyncInfo('last_sync', new Date().toISOString());
+
+        // Cleanup orphaned data (ghosts)
+        this.db.cleanupOrphans();
+
         logger.sync.success();
     }
 
@@ -103,10 +118,7 @@ export class ApiSync {
 
         for (const floor of floors) {
             if (!floor.image_url) continue;
-            const existing = (floor.local_image_path || '').trim();
-            if (existing && fs.existsSync(existing)) {
-                continue;
-            }
+
             const imgUrl = floor.image_url.startsWith('http')
                 ? floor.image_url
                 : `${this.baseUrl}${floor.image_url.startsWith('/') ? '' : '/'}${floor.image_url}`;

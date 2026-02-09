@@ -50,7 +50,7 @@ interface FloorRun {
 }
 
 // Constants
-const ANIMATION_SPEED = 70; // px per second
+const ANIMATION_SPEED = 45; // reduced from 70px per second
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_ANIMATION_LOOPS = 3;
 
@@ -61,6 +61,15 @@ class KioskApp {
     private kioskId: number;
     private kioskWaypointId: string | null = null;
     private kioskFloorId: number | null = null;
+
+    // Modern Animation Colors
+    private colors = {
+        cyan: '#06b6d4',
+        blue: '#3b82f6',
+        red: '#ef4444',
+        white: '#ffffff',
+        glow: 'rgba(6, 182, 212, 0.4)'
+    };
 
     private floors: Floor[] = [];
     private currentFloor: Floor | null = null;
@@ -539,7 +548,7 @@ class KioskApp {
 
     showPathInfo(info: NavigationResult) {
         const pathInfoEl = document.getElementById('path-info')!;
-        pathInfoEl.classList.remove('hidden');
+        pathInfoEl.classList.add('hidden'); // HIDDEN AS PER USER REQUEST
 
         document.getElementById('distance')!.textContent = Math.round(info.total_distance).toString();
         document.getElementById('time')!.textContent = info.estimated_time_minutes.toFixed(1);
@@ -673,20 +682,313 @@ class KioskApp {
         return points[points.length - 1] || { x: 0, y: 0 };
     }
 
+
+
+    // --- Modern Rendering Helpers ---
+
+    drawGradientPath(ctx: CanvasRenderingContext2D, points: { x: number; y: number }[]) {
+        if (points.length < 2) return;
+
+        // Create gradient along the path bounding box for simplicity, 
+        // or just a fixed gradient from start to end of the viewport
+        // For a path, a strokeStyle gradient is tricky without a second canvas.
+        // Let's use a "Glowing Line" effect with a fixed lush solid color + shadow first, 
+        // effectively gradient-like via shadow.
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = this.colors.cyan;
+        ctx.shadowColor = this.colors.cyan;
+        ctx.shadowBlur = 15;
+        ctx.globalAlpha = 0.6; // Base path is semi-transparent
+
+        ctx.beginPath();
+        points.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+        });
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    drawFlowEffect(ctx: CanvasRenderingContext2D, points: { x: number; y: number }[], totalLen: number, time: number) {
+        if (points.length < 2) return;
+
+        // Create a moving dash effect (Flowing Energy)
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = this.colors.white;
+        ctx.shadowColor = this.colors.white;
+        ctx.shadowBlur = 10;
+
+        // Flow speed
+        const offset = -(time / 10) % 40; // 40px pattern
+
+        ctx.setLineDash([10, 30]); // Short opaque dash, long gap
+        ctx.lineDashOffset = offset;
+
+        ctx.beginPath();
+        points.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+        });
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    drawNavigator(ctx: CanvasRenderingContext2D, pos: { x: number; y: number }, nextPos: { x: number; y: number } | null) {
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+
+        // Calculate rotation/orientation
+        // DO NOT rotate the full canvas, or the person will be upside down going left.
+        // Instead, just flip horizontally if moving left.
+        let isMovingLeft = false;
+        if (nextPos) {
+            const dx = nextPos.x - pos.x;
+            if (dx < 0) isMovingLeft = true;
+        }
+
+        if (isMovingLeft) {
+            ctx.scale(-1, 1);
+        }
+
+        // WALKING MAN ANIMATION (Side View / Billboard style)
+        // Since we rotate the canvas to align with the path, drawing a "Side View" man 
+        // effectively looks like he is walking along the line on the floor.
+
+        const time = performance.now();
+        const cycle = (time / 400) % (Math.PI * 2); // Walking cycle speed
+
+        // Colors
+        ctx.fillStyle = this.colors.blue;
+        ctx.strokeStyle = this.colors.white;
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 5;
+
+        // Bouncing body
+        const bounce = Math.abs(Math.sin(cycle * 2)) * 2;
+
+        // --- DRAWING THE MAN (Facing Right relative to path) ---
+        // Scale him up a bit
+        const s = 1.2;
+
+        // 1. LEGS
+        // Right Leg (Back)
+        const rightLegAngle = Math.sin(cycle) * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(0, 0 - bounce); // Hip
+        ctx.lineTo(Math.sin(rightLegAngle) * 12 * s, (Math.cos(rightLegAngle) * 12 * s) - bounce); // Foot
+        ctx.stroke();
+
+        // Left Leg (Front)
+        const leftLegAngle = Math.sin(cycle + Math.PI) * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(0, 0 - bounce); // Hip
+        ctx.lineTo(Math.sin(leftLegAngle) * 12 * s, (Math.cos(leftLegAngle) * 12 * s) - bounce); // Foot
+        ctx.stroke();
+
+        // 2. BODY
+        ctx.beginPath();
+        ctx.moveTo(0, 0 - bounce); // Hip
+        ctx.lineTo(2 * s, -14 * s - bounce); // Neck (slightly forward lean)
+        ctx.stroke();
+
+        // 3. ARMS
+        // Right Arm (Back) - swings opposite to right leg
+        const rightArmAngle = Math.sin(cycle + Math.PI) * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(2 * s, -12 * s - bounce); // Shoulder
+        ctx.lineTo(Math.sin(rightArmAngle) * 10 * s + 2, (Math.cos(rightArmAngle) * 10 * s) - 12 - bounce); // Hand
+        ctx.stroke();
+
+        // 3. HEAD
+        ctx.beginPath();
+        ctx.fillStyle = this.colors.blue;
+        ctx.arc(3 * s, -16 * s - bounce, 3.5 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // 4. Left Arm (Front)
+        const leftArmAngle = Math.sin(cycle) * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(2 * s, -12 * s - bounce); // Shoulder
+        ctx.lineTo(Math.sin(leftArmAngle) * 10 * s + 2, (Math.cos(leftArmAngle) * 10 * s) - 12 - bounce); // Hand
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    drawStartMarker(ctx: CanvasRenderingContext2D, pos: { x: number; y: number }, time: number) {
+        // Radar Pulse Effect
+        const pulse1 = (Math.sin(time / 400) + 1) / 2;
+        const pulse2 = (Math.sin((time + 1000) / 400) + 1) / 2; // Offset pulse
+
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+
+        // Outer Ring 1
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(6, 182, 212, ${1 - pulse1})`;
+        ctx.lineWidth = 2;
+        ctx.arc(0, 0, 10 + pulse1 * 30, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Outer Ring 2
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(6, 182, 212, ${1 - pulse2})`;
+        ctx.lineWidth = 2;
+        ctx.arc(0, 0, 10 + pulse2 * 30, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Core
+        ctx.beginPath();
+        ctx.fillStyle = this.colors.cyan;
+        ctx.strokeStyle = this.colors.white;
+        ctx.lineWidth = 3;
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Label shadow
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 4;
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 12px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText("Siz shu yerdasiz", 0, 24);
+
+        ctx.restore();
+    }
+
+    drawEndMarker(ctx: CanvasRenderingContext2D, pos: { x: number; y: number }, time: number, label: string) {
+        const bounce = Math.abs(Math.sin(time / 300)) * 10;
+
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+
+        // Shadow on "ground"
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        let shadowSize = 8 - bounce / 3;
+        if (shadowSize < 0) shadowSize = 0;
+        ctx.ellipse(0, 0, shadowSize, shadowSize / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Floating Pin
+        ctx.translate(0, -bounce);
+
+        // Pin Shape (Standard Teardrop)
+        const pinSize = 20; // slightly taller
+        const pinWidth = 10; // wider
+
+        ctx.beginPath();
+        // Top Circle arc
+        ctx.arc(0, -pinSize, pinWidth, Math.PI, 0);
+        // Bottom Point
+        ctx.bezierCurveTo(pinWidth, -pinSize + 15, 0, 0, 0, 0);
+        ctx.bezierCurveTo(0, 0, -pinWidth, -pinSize + 15, -pinWidth, -pinSize);
+        ctx.closePath();
+
+        // Gradient Fill (Glossy Red)
+        const grad = ctx.createLinearGradient(-12, -pinSize - 10, 12, -20);
+        grad.addColorStop(0, '#ff5252'); // Light Red
+        grad.addColorStop(1, '#b91c1c'); // Dark Red
+
+        ctx.fillStyle = grad;
+        ctx.strokeStyle = '#4dd4e6ff'; // User's custom cyan
+        ctx.lineWidth = 2.0;
+        ctx.fill();
+        ctx.stroke();
+
+        // Inner White Circle
+        ctx.beginPath();
+        ctx.fillStyle = '#ffffff';
+        ctx.arc(0, -pinSize, 5, 0, Math.PI * 2); // User's custom size
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 13px Inter, sans-serif';
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 4;
+        ctx.textAlign = 'center';
+        ctx.fillText(label, 0, -pinSize - 22);
+
+        ctx.restore();
+    }
+
+    drawRoomLabels(ctx: CanvasRenderingContext2D, toCanvas: (p: { x: number, y: number }) => { x: number, y: number }) {
+        if (!this.waypoints || this.waypoints.length === 0) return;
+
+        ctx.save();
+        ctx.font = '12px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        this.waypoints.forEach(wp => {
+            // Only draw if it's a room and has a label
+            if (wp.type === 'room' && wp.label) {
+                const pos = toCanvas({ x: wp.x, y: wp.y });
+                const text = wp.label;
+                const metrics = ctx.measureText(text);
+                const padding = 4; // Larger padding
+                const w = metrics.width + padding * 2;
+                const h = 16; // Larger height
+
+                // Glassmorphism Background
+                ctx.save();
+                ctx.translate(pos.x, pos.y);
+
+                // Shadow
+                ctx.shadowColor = 'rgba(0,0,0,0.4)';
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetY = 2;
+
+                // Background (Bright White/Glass)
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; // High contrast white
+                ctx.strokeStyle = 'rgba(200, 200, 200, 0.5)'; // Subtle border
+                ctx.lineWidth = 1;
+
+                // Rounded Rect
+                ctx.beginPath();
+                ctx.roundRect(-w / 2, -h / 2, w, h, 6);
+                ctx.fill();
+                ctx.stroke();
+
+                // Text (Sharp Black)
+                ctx.shadowColor = 'transparent'; // Remove shadow for text clarity
+                ctx.fillStyle = '#000000'; // Black text is easiest to read on white
+                ctx.font = 'bold 12px Inter, sans-serif';
+                ctx.fillText(text, 0, 0);
+
+                ctx.restore();
+            }
+        });
+        ctx.restore();
+    }
+
     render(time: number) {
-        // ... (existing render code, kept same just abbreviated here to start append)
+        if (!this.ctx || !this.canvas) return;
         const ctx = this.ctx;
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
 
-        // Clear canvas
+        // Clear canvas with dark elegant background
         ctx.fillStyle = '#0f172a';
         ctx.fillRect(0, 0, width, height);
 
         const floorImage = this.currentFloor ? this.floorImages.get(this.currentFloor.id) : null;
 
         if (!floorImage || !this.currentFloor) {
-            ctx.fillStyle = '#94a3b8';
+            ctx.fillStyle = '#64748b';
             ctx.font = '16px sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText('Rasm yuklanmagan', width / 2, height / 2);
@@ -696,7 +998,7 @@ class KioskApp {
         // Calculate scale and offset to fit image
         const imgWidth = this.currentFloor.image_width || floorImage.width;
         const imgHeight = this.currentFloor.image_height || floorImage.height;
-        const scale = Math.min(width / imgWidth, height / imgHeight) * 0.92;
+        const scale = Math.min(width / imgWidth, height / imgHeight) * 0.95; // Slightly smaller for padding
         const imageWidth = imgWidth * scale;
         const imageHeight = imgHeight * scale;
         const offsetX = (width - imageWidth) / 2;
@@ -705,11 +1007,18 @@ class KioskApp {
         // Draw floor image
         ctx.drawImage(floorImage, offsetX, offsetY, imageWidth, imageHeight);
 
+        // Darken backdrop slightly to make path pop (Reduced for clarity)
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.1)'; // Was 0.4
+        ctx.fillRect(0, 0, width, height);
+
         // Coordinate converter
         const toCanvas = (point: { x: number; y: number }) => ({
             x: offsetX + point.x * scale,
             y: offsetY + point.y * scale,
         });
+
+        // Draw Room Labels (Glass Effect)
+        this.drawRoomLabels(ctx, toCanvas);
 
         // Get path for current floor
         const currentFloorPath = this.navigationPath?.filter(
@@ -717,23 +1026,20 @@ class KioskApp {
         ) || [];
 
         const points = currentFloorPath.map(step => toCanvas({ x: step.x, y: step.y }));
-        const pulse = (Math.sin(time / 320) + 1) / 2;
 
-        // Draw dotted path
         if (points.length >= 2) {
             const totalLength = this.computePathLength(points);
 
-            // Handle animation and floor transitions
+            // Handle animation logic (same as before but cleaner)
             if (this.isAnimating) {
                 const elapsed = (time - this.animationStartTime) / 1000;
                 this.animationProgress = elapsed * ANIMATION_SPEED;
-                this.dashOffset -= 0.5;
 
-                // Check if this floor's animation is complete
+                // Check finish logic
                 if (this.animationProgress >= totalLength) {
-                    // Check if there are more floors
+                    // ... same multi-floor logic logic as before ...
+                    // For brevity, using the core logic block:
                     if (this.activeRunIndex < this.floorRuns.length - 1) {
-                        // Move to next floor
                         this.activeRunIndex++;
                         const nextRun = this.floorRuns[this.activeRunIndex];
                         const nextFloor = this.floors.find(f => f.id === nextRun.floorId);
@@ -744,16 +1050,11 @@ class KioskApp {
                             this.animationStartTime = time;
                         }
                     } else {
-                        // All floors done, increment loop count
                         this.animationLoopCount++;
-
                         if (this.animationLoopCount < this.maxAnimationLoops) {
-                            // Restart animation from beginning
                             this.activeRunIndex = 0;
                             this.animationProgress = 0;
                             this.animationStartTime = time;
-
-                            // Go back to first floor
                             if (this.floorRuns.length > 0) {
                                 const firstRun = this.floorRuns[0];
                                 const firstFloor = this.floors.find(f => f.id === firstRun.floorId);
@@ -762,11 +1063,8 @@ class KioskApp {
                                 }
                             }
                         } else {
-                            // Animation completed, stop at kiosk floor
                             this.isAnimating = false;
                             this.animationProgress = totalLength;
-
-                            // Go to kiosk floor
                             const kioskFloor = this.floors.find(f => f.id === this.kioskFloorId);
                             if (kioskFloor && kioskFloor !== this.currentFloor) {
                                 this.selectFloor(kioskFloor);
@@ -780,139 +1078,39 @@ class KioskApp {
                 ? Math.min(this.animationProgress, totalLength)
                 : totalLength;
 
-            // Path with dotted effect
-            ctx.save();
-            ctx.strokeStyle = '#22C55E';
-            ctx.lineWidth = 4;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.setLineDash([2, 10]);
-            ctx.lineDashOffset = this.dashOffset;
-            ctx.beginPath();
-            points.forEach((p, idx) => {
-                if (idx === 0) ctx.moveTo(p.x, p.y);
-                else ctx.lineTo(p.x, p.y);
-            });
-            ctx.stroke();
-            ctx.restore();
+            // 1. Draw The "Energy" Path
+            this.drawGradientPath(ctx, points);
+            this.drawFlowEffect(ctx, points, totalLength, time);
 
-            // Path dots
-            const maxDots = 60;
-            const step = Math.max(1, Math.ceil(points.length / maxDots));
-            points.forEach((p, idx) => {
-                if (idx === 0 || idx === points.length - 1) return;
-                if (idx % step !== 0) return;
-                ctx.beginPath();
-                ctx.fillStyle = '#a7f3d0';
-                ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-                ctx.fill();
-            });
-
-            // Draw mover (walking person)
+            // 2. Draw The "Navigator" (Arrow)
             if (this.isAnimating && drawProgress < totalLength) {
-                const mover = this.getPointAtLength(points, drawProgress);
+                const currentPos = this.getPointAtLength(points, drawProgress);
+                // Look ahead slightly for rotation
+                const lookAheadDist = Math.min(drawProgress + 10, totalLength);
+                const nextPos = this.getPointAtLength(points, lookAheadDist);
 
-                ctx.save();
-                ctx.shadowColor = 'rgba(56,189,248,0.6)';
-                ctx.shadowBlur = 12;
-
-                // Body
-                ctx.fillStyle = '#38bdf8';
-                ctx.strokeStyle = '#f8fafc';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.roundRect(mover.x - 4.5, mover.y - 2, 9, 12, 4);
-                ctx.fill();
-                ctx.stroke();
-
-                // Head
-                ctx.beginPath();
-                ctx.fillStyle = '#f8fafc';
-                ctx.strokeStyle = '#38bdf8';
-                ctx.lineWidth = 1.5;
-                ctx.arc(mover.x, mover.y - 6, 4, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-                ctx.restore();
+                this.drawNavigator(ctx, currentPos, nextPos);
             }
         }
 
+        // Draw Start Marker (Radar)
         if (this.kioskWaypointId && this.currentFloor?.id === this.kioskFloorId) {
             const kioskWp = this.waypoints.find(w => w.id === this.kioskWaypointId);
             if (kioskWp) {
                 const pos = toCanvas({ x: kioskWp.x, y: kioskWp.y });
-
-                // Pulse ring
-                const ringRadius = 10 + pulse * 6;
-                const ringOpacity = 0.35 + pulse * 0.35;
-
-                ctx.save();
-                ctx.beginPath();
-                ctx.fillStyle = `rgba(14,165,233,${0.15 * ringOpacity})`;
-                ctx.strokeStyle = `rgba(14,165,233,${0.8 * ringOpacity})`;
-                ctx.lineWidth = 2;
-                ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                // Center dot
-                ctx.beginPath();
-                ctx.fillStyle = '#0ea5e9'; // Blue-500
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                // Label
-                ctx.fillStyle = '#f8fafc';
-                ctx.font = 'bold 14px system-ui';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'bottom';
-                ctx.shadowColor = 'rgba(0,0,0,0.8)';
-                ctx.shadowBlur = 4;
-                ctx.fillText("Siz shu yerdasiz", pos.x, pos.y - 18);
-                ctx.restore();
+                this.drawStartMarker(ctx, pos, time);
             }
         }
 
-        // Draw destination marker
+        // Draw End Marker (3D Pin)
         const lastStep = this.navigationPath?.[this.navigationPath.length - 1];
         if (lastStep && lastStep.floor_id === this.currentFloor?.id) {
             const pos = toCanvas({ x: lastStep.x, y: lastStep.y });
-
-            // Bounce effect
-            const bounce = Math.abs(Math.sin(time / 200)) * 8;
-
-            ctx.save();
-            // Shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            ctx.beginPath();
-            ctx.ellipse(pos.x, pos.y, 8 - bounce / 3, 4 - bounce / 5, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Pin
-            ctx.translate(pos.x, pos.y - bounce);
-            ctx.beginPath();
-            ctx.fillStyle = '#ef4444'; // Red-500
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 2;
-            // Draw pin shape
-            ctx.moveTo(0, 0);
-            ctx.arc(0, -28, 14, Math.PI / 2, Math.PI * 2.5); // Circle part
-            ctx.lineTo(0, 0); // Point
-            ctx.fill();
-            ctx.stroke();
-
-            // Icon inside pin
-            ctx.fillStyle = '#fff';
-            ctx.font = '14px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('★', 0, -28);
-            ctx.restore();
+            const label = this.selectedRoom?.name || "Manzil";
+            this.drawEndMarker(ctx, pos, time, label);
         }
     }
+
 }
 
 // Virtual Keyboard Class

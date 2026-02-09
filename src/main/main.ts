@@ -1,6 +1,7 @@
 // src/main/main.ts
 import { app, BrowserWindow, ipcMain, Menu } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { Database } from './database';
 import { ApiSync } from './api-sync';
 import { logger } from './logger';
@@ -46,6 +47,25 @@ function createWindow() {
 
         // Block keyboard shortcuts (except F11/DevTools if debug enabled)
         mainWindow.webContents.on('before-input-event', (event, input) => {
+            // Allow Factory Reset (Ctrl+Shift+Delete) even in Kiosk mode
+            if (input.control && input.shift && input.key === 'Delete') {
+                logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
+                const userDataPath = app.getPath('userData');
+                const configPath = path.join(userDataPath, 'config.json');
+
+                try {
+                    if (fs.existsSync(configPath)) {
+                        fs.unlinkSync(configPath);
+                        logger.info('🗑️ [RESET] Config file deleted');
+                    }
+                    app.relaunch();
+                    app.exit(0);
+                } catch (err) {
+                    logger.error(`❌ [RESET] Failed to reset: ${err}`);
+                }
+                return;
+            }
+
             if (config.DEBUG_MODE) return;
 
             // Block DevTools (Ctrl+Shift+I / F12)
@@ -55,6 +75,25 @@ function createWindow() {
             // Block Reload (Ctrl+R / F5)
             if ((input.control && input.key.toLowerCase() === 'r') || input.key === 'F5') {
                 event.preventDefault();
+            }
+        });
+    } else {
+        // Non-Kiosk Mode: Still allow Factory Reset
+        mainWindow.webContents.on('before-input-event', (event, input) => {
+            if (input.control && input.shift && input.key === 'Delete') {
+                logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
+                const userDataPath = app.getPath('userData');
+                const configPath = path.join(userDataPath, 'config.json');
+
+                try {
+                    if (fs.existsSync(configPath)) {
+                        fs.unlinkSync(configPath);
+                    }
+                    app.relaunch();
+                    app.exit(0);
+                } catch (err) {
+                    logger.error(`❌ [RESET] Failed to reset: ${err}`);
+                }
             }
         });
     }

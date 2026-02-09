@@ -30,7 +30,7 @@ const parseBool = (raw: string, fallback: boolean): boolean => {
 
 // Default values
 const defaults = {
-    API_URL: 'http://54.160.198.4:8000',
+    API_URL: 'http://3.77.140.158:8000',
     KIOSK_ID: '0',
     KIOSK_MODE: 'false',
     AUTO_FULLSCREEN: 'false',
