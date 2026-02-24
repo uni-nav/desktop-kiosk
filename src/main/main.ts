@@ -121,9 +121,10 @@ function createWindow() {
         mainWindow.setResizable(true);
         mainWindow.center();
     } else {
-        const startPage = path.join(__dirname, '../renderer/launcher.html');
-        logger.window.loadPage(startPage);
-        mainWindow.loadFile(startPage);
+        const startPage = path.join(__dirname, `../renderer/kiosk.html`);
+        const kioskUrl = `file://${startPage}?kiosk_id=${config.KIOSK_ID}`;
+        logger.window.loadPage(kioskUrl);
+        mainWindow.loadURL(kioskUrl);
     }
 
     mainWindow.on('closed', () => {

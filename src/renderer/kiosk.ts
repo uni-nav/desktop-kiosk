@@ -939,9 +939,10 @@ class KioskApp {
                 const pos = toCanvas({ x: wp.x, y: wp.y });
                 const text = wp.label;
                 const metrics = ctx.measureText(text);
-                const padding = 4; // Larger padding
-                const w = metrics.width + padding * 2;
-                const h = 16; // Larger height
+                const paddingX = 10; // Extra horizontal padding
+                const paddingY = 6;  // Extra vertical padding
+                const w = metrics.width + paddingX * 2;
+                const h = 16 + paddingY * 2; // Taller background
 
                 // Glassmorphism Background
                 ctx.save();
