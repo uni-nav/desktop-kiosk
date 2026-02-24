@@ -1,5 +1,5 @@
 // src/main/main.ts
-import { app, BrowserWindow, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Database } from './database';
@@ -173,6 +173,20 @@ async function initialize() {
 }
 
 app.whenReady().then(async () => {
+    // 24/7 Kiosk features: Prevent Sleep and start on boot
+    if (config.KIOSK_MODE) {
+        powerSaveBlocker.start('prevent-display-sleep');
+        try {
+            app.setLoginItemSettings({
+                openAtLogin: true,
+                path: app.getPath('exe')
+            });
+            logger.info('🛡️ [SYSTEM] Auto-start on boot enabled.');
+        } catch (e) {
+            logger.warn('⚠️ [SYSTEM] Could not set auto-start. Run as admin if necessary.');
+        }
+    }
+
     await initialize();
     createWindow();
 
