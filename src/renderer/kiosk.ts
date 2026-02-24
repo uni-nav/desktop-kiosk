@@ -1020,12 +1020,13 @@ class KioskApp {
         // Draw Room Labels (Glass Effect)
         this.drawRoomLabels(ctx, toCanvas);
 
-        // Get path for current floor
-        const currentFloorPath = this.navigationPath?.filter(
-            step => step.floor_id === this.currentFloor?.id
-        ) || [];
+        // Get path for current floor RUN (not all points on this floor to avoid cross-floor jumps)
+        const activeRun = this.floorRuns[this.activeRunIndex];
+        const currentRunPath = activeRun && activeRun.floorId === this.currentFloor?.id
+            ? activeRun.steps
+            : [];
 
-        const points = currentFloorPath.map(step => toCanvas({ x: step.x, y: step.y }));
+        const points = currentRunPath.map(step => toCanvas({ x: step.x, y: step.y }));
 
         if (points.length >= 2) {
             const totalLength = this.computePathLength(points);
