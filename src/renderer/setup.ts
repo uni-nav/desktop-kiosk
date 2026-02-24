@@ -24,12 +24,7 @@ fetchKiosksBtn.addEventListener('click', async () => {
     fetchKiosksBtn.disabled = true;
     fetchKiosksBtn.textContent = 'Yuklanmoqda...';
     try {
-        const response = await fetch(`${rawUrl}/api/kiosks/`, {
-            // adding timeout via AbortController would be good, but standard fetch has no immediate timeout.
-            // just standard fetch
-        });
-        if (!response.ok) throw new Error('API xatosi: ' + response.status);
-        const kiosks = await response.json();
+        const kiosks = await setupAPI.fetchKiosks(rawUrl);
 
         kioskListSelect.innerHTML = '<option value="">Kioskni tanlang...</option>';
         kiosks.forEach((k: any) => {

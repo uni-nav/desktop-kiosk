@@ -226,6 +226,23 @@ ipcMain.handle('setup-check-connection', async (_, url: string) => {
     }
 });
 
+import * as https from 'https';
+ipcMain.handle('setup-fetch-kiosks', async (_, url: string) => {
+    try {
+        const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+        const client = axios.create({
+            baseURL: base,
+            timeout: 10000,
+            httpsAgent: new https.Agent({ rejectUnauthorized: false })
+        });
+        const res = await client.get('/api/kiosks/');
+        return res.data;
+    } catch (err: any) {
+        logger.error(`Setup fetch kiosks failed: ${err.message}`);
+        throw new Error(err.message);
+    }
+});
+
 ipcMain.handle('setup-save-config', async (_, apiUrl: string, kioskId: number, kioskMode: boolean, autoFullscreen: boolean, idleTimeout: number, animationLoops: number, debugMode: boolean) => {
     const normalizedUrl = String(apiUrl || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
     const safeIdleTimeout = Number.isFinite(idleTimeout) && idleTimeout > 0 ? idleTimeout : getConfig().IDLE_TIMEOUT_MS;

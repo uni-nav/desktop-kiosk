@@ -36,6 +36,7 @@ declare const kioskAPI: KioskAPIInterface;
 
 interface SetupAPIInterface {
     checkConnection: (url: string) => Promise<boolean>;
+    fetchKiosks: (url: string) => Promise<any[]>;
     saveAndRestart: (
         apiUrl: string,
         kioskId: number,

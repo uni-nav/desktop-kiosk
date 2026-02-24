@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('kioskAPI', {
 // Expose Setup API separately
 contextBridge.exposeInMainWorld('setupAPI', {
     checkConnection: (url: string) => ipcRenderer.invoke('setup-check-connection', url),
+    fetchKiosks: (url: string) => ipcRenderer.invoke('setup-fetch-kiosks', url),
     saveAndRestart: (
         apiUrl: string, kioskId: number, kioskMode: boolean, autoFullscreen: boolean,
         idleTimeout: number, animationLoops: number, debugMode: boolean
