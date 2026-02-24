@@ -6,7 +6,6 @@ class LauncherApp {
     private statusIndicator: HTMLElement;
     private statusText: HTMLElement;
     private syncBtn: HTMLButtonElement;
-    private fullscreenBtn: HTMLButtonElement;
     private floors: Map<number, { name: string; floor_number: number }> = new Map();
 
     constructor() {
@@ -14,7 +13,6 @@ class LauncherApp {
         this.statusIndicator = document.getElementById('status-indicator')!;
         this.statusText = document.getElementById('status-text')!;
         this.syncBtn = document.getElementById('sync-btn') as HTMLButtonElement;
-        this.fullscreenBtn = document.getElementById('fullscreen-btn') as HTMLButtonElement;
 
         this.init();
     }
@@ -22,7 +20,6 @@ class LauncherApp {
     async init() {
         // Event listeners
         this.syncBtn.addEventListener('click', () => this.syncData());
-        this.fullscreenBtn.addEventListener('click', () => kioskAPI.toggleFullscreen());
 
         // Load data
         await this.checkOnlineStatus();
