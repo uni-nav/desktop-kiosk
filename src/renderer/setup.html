@@ -161,12 +161,17 @@
 
         <div class="form-group">
             <label for="api-url">Server Manzili (API URL)</label>
-            <input type="url" id="api-url" placeholder="http://192.168.1.100:8000" value="http://3.77.140.158:8000">
+            <div style="display: flex; gap: 0.5rem;">
+                <input type="url" id="api-url" placeholder="https://map.ranch.university/api" value="https://map.ranch.university/api">
+                <button type="button" id="fetch-kiosks-btn" style="width: auto; padding: 0.75rem;">Yuklash</button>
+            </div>
         </div>
 
         <div class="form-group">
-            <label for="kiosk-id">Kiosk ID</label>
-            <input type="number" id="kiosk-id" placeholder="1" min="1">
+            <label for="kiosk-list">Kioskni tanlang</label>
+            <select id="kiosk-list" style="width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid #334155; border-radius: 0.5rem; color: white; font-size: 1rem;">
+                <option value="">Oldin manzilni yuklang...</option>
+            </select>
         </div>
 
         <div class="form-group">
@@ -179,15 +184,7 @@
             <input type="number" id="animation-loops" placeholder="3" value="3" min="1">
         </div>
 
-        <div class="checkbox-group">
-            <input type="checkbox" id="auto-fullscreen">
-            <label for="auto-fullscreen">Avtomatik To'liq Ekran (Fullscreen)</label>
-        </div>
 
-        <div class="checkbox-group">
-            <input type="checkbox" id="kiosk-mode">
-            <label for="kiosk-mode">Kiosk Rejimi (Bloklangan)</label>
-        </div>
 
         <div class="checkbox-group">
             <input type="checkbox" id="debug-mode">

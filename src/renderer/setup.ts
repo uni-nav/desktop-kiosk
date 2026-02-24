@@ -1,11 +1,10 @@
 /// <reference path="./types.d.ts" />
 
 const apiUrlInput = document.getElementById('api-url') as HTMLInputElement;
-const kioskIdInput = document.getElementById('kiosk-id') as HTMLInputElement;
+const fetchKiosksBtn = document.getElementById('fetch-kiosks-btn') as HTMLButtonElement;
+const kioskListSelect = document.getElementById('kiosk-list') as HTMLSelectElement;
 const idleTimeoutInput = document.getElementById('idle-timeout') as HTMLInputElement;
 const animationLoopsInput = document.getElementById('animation-loops') as HTMLInputElement;
-const autoFullscreenInput = document.getElementById('auto-fullscreen') as HTMLInputElement;
-const kioskModeInput = document.getElementById('kiosk-mode') as HTMLInputElement;
 const debugModeInput = document.getElementById('debug-mode') as HTMLInputElement;
 
 const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
@@ -15,6 +14,39 @@ const spinner = document.getElementById('spinner') as HTMLDivElement;
 
 console.log('Setup script loaded');
 
+fetchKiosksBtn.addEventListener('click', async () => {
+    const rawUrl = apiUrlInput.value.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+    if (!rawUrl) {
+        showError('Iltimos, avval Server Manzilini kiriting');
+        return;
+    }
+
+    fetchKiosksBtn.disabled = true;
+    fetchKiosksBtn.textContent = 'Yuklanmoqda...';
+    try {
+        const response = await fetch(`${rawUrl}/api/kiosks/`, {
+            // adding timeout via AbortController would be good, but standard fetch has no immediate timeout.
+            // just standard fetch
+        });
+        if (!response.ok) throw new Error('API xatosi: ' + response.status);
+        const kiosks = await response.json();
+
+        kioskListSelect.innerHTML = '<option value="">Kioskni tanlang...</option>';
+        kiosks.forEach((k: any) => {
+            const opt = document.createElement('option');
+            opt.value = k.id;
+            opt.textContent = `[ID: ${k.id}] ${k.name || 'Nomsiz Kiosk'} (${k.status || 'Noma\'lum'})`;
+            kioskListSelect.appendChild(opt);
+        });
+        showSuccess(`Muvaffaqiyatli ${kiosks.length} ta kiosk yuklandi!`);
+    } catch (err: any) {
+        showError('Kiosklarni yuklash xatosi: ' + err.message);
+        kioskListSelect.innerHTML = '<option value="">Tur tarmoqqa yoki manzilga bog\'lanishda xato!</option>';
+    } finally {
+        fetchKiosksBtn.disabled = false;
+        fetchKiosksBtn.textContent = 'Yuklash';
+    }
+});
 // Check API availability
 if (typeof setupAPI === 'undefined') {
     console.error('CRITICAL: setupAPI is undefined');
@@ -24,15 +56,15 @@ if (typeof setupAPI === 'undefined') {
 saveBtn.addEventListener('click', async () => {
     console.log('Save button clicked');
     const apiUrl = apiUrlInput.value.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
-    const kioskId = parseInt(kioskIdInput.value.trim());
+    const kioskId = parseInt(kioskListSelect.value);
     const idleTimeout = parseInt(idleTimeoutInput.value.trim() || '300000');
     const animationLoops = parseInt(animationLoopsInput.value.trim() || '3');
-    const autoFullscreen = autoFullscreenInput.checked;
-    const kioskMode = kioskModeInput.checked;
+    const autoFullscreen = true; // Always true for security
+    const kioskMode = true; // Always true for security
     const debugMode = debugModeInput.checked;
 
     if (!apiUrl || isNaN(kioskId) || kioskId < 1) {
-        showError('Iltimos, server manzili va Kiosk ID (raqam) ni to\'g\'ri kiriting');
+        showError('Iltimos, server manzili kiriting va ro\'yxatdan Kiosk tanlang');
         return;
     }
     if (!Number.isFinite(idleTimeout) || idleTimeout < 10000) {
