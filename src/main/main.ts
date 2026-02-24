@@ -1,5 +1,9 @@
 // src/main/main.ts
 import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from 'electron';
+
+// Bypass SSL certificate errors for internal kiosk communication
+app.commandLine.appendSwitch('ignore-certificate-errors', 'true');
+
 import * as path from 'path';
 import * as fs from 'fs';
 import { Database } from './database';
