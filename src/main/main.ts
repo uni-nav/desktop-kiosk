@@ -55,8 +55,8 @@ function createWindow() {
 
         // Block keyboard shortcuts (except F11/DevTools if debug enabled)
         mainWindow.webContents.on('before-input-event', (event, input) => {
-            // Allow Factory Reset (Ctrl+Shift+Delete) even in Kiosk mode
-            if (input.control && input.shift && input.key === 'Delete') {
+            // Allow Factory Reset (Ctrl+Shift+Delete or Cmd+Shift+Delete) even in Kiosk mode
+            if ((input.control || input.meta) && input.shift && input.key === 'Delete') {
                 logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
                 const userDataPath = app.getPath('userData');
                 const configPath = path.join(userDataPath, 'config.json');
@@ -88,7 +88,7 @@ function createWindow() {
     } else {
         // Non-Kiosk Mode: Still allow Factory Reset
         mainWindow.webContents.on('before-input-event', (event, input) => {
-            if (input.control && input.shift && input.key === 'Delete') {
+            if ((input.control || input.meta) && input.shift && input.key === 'Delete') {
                 logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
                 const userDataPath = app.getPath('userData');
                 const configPath = path.join(userDataPath, 'config.json');

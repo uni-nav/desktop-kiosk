@@ -1,5 +1,5 @@
-// src/main/api-sync.ts
 import axios, { AxiosInstance } from 'axios';
+import * as https from 'https';
 import { Database } from './database';
 import { logger } from './logger';
 import * as path from 'path';
@@ -19,7 +19,10 @@ export class ApiSync {
             timeout: 10000,
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            httpsAgent: new https.Agent({
+                rejectUnauthorized: false
+            })
         });
     }
 
