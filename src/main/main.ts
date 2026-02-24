@@ -14,6 +14,10 @@ let apiSync: ApiSync;
 let syncInterval: NodeJS.Timeout | null = null;
 let syncInProgress = false;
 
+async function probeHealth(base: string): Promise<void> {
+    await axios.get(`${base}/api/health`, { timeout: 5000 });
+}
+
 // Load config
 const config = loadConfig();
 
@@ -196,7 +200,7 @@ app.on('window-all-closed', () => {
 ipcMain.handle('setup-check-connection', async (_, url: string) => {
     try {
         const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
-        await axios.get(`${base}/health`, { timeout: 5000 });
+        await probeHealth(base);
         return true;
     } catch (err) {
         logger.warn(`Setup connection failed: ${err}`);

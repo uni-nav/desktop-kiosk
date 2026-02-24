@@ -25,7 +25,7 @@ export class ApiSync {
 
     async isOnline(): Promise<boolean> {
         try {
-            await this.client.get('/health');
+            await this.client.get('/api/health');
             this.online = true;
             return true;
         } catch {
