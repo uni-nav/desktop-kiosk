@@ -31,7 +31,6 @@ contextBridge.exposeInMainWorld('kioskAPI', {
 
     // Navigation
     openKiosk: (kioskId: number) => ipcRenderer.send('open-kiosk', kioskId),
-    backToLauncher: () => ipcRenderer.send('back-to-launcher'),
     toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
 
     // Logging

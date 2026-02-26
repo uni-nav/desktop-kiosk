@@ -37,6 +37,7 @@ export interface Room {
     name: string;
     waypoint_id: string | null;
     floor_id: number | null;
+    keywords: string | null;
 }
 
 export interface Kiosk {
@@ -69,6 +70,10 @@ export class Database {
     private dbPath: string;
     private storageDir: string;
     private initialized: boolean = false;
+
+    /** Debounce timer for save() — prevents excessive disk writes */
+    private saveTimer: ReturnType<typeof setTimeout> | null = null;
+    private readonly SAVE_DEBOUNCE_MS = 500;
 
     constructor(userDataPath: string) {
         this.storageDir = userDataPath;
@@ -153,6 +158,8 @@ export class Database {
             )
         `);
 
+        this.ensureColumn('rooms', 'keywords', 'TEXT');
+
         this.db.run(`
             CREATE TABLE IF NOT EXISTS kiosks (
                 id INTEGER PRIMARY KEY,
@@ -171,7 +178,7 @@ export class Database {
             )
         `);
 
-        this.save();
+        this.saveNow();
     }
 
     private ensureColumn(table: string, column: string, columnType: string): void {
@@ -186,19 +193,50 @@ export class Database {
         }
     }
 
+    /**
+     * Debounced save — waits 500ms before writing to disk.
+     * Multiple rapid calls result in only one disk write.
+     */
     private save() {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+        }
+        this.saveTimer = setTimeout(() => {
+            this.saveNow();
+            this.saveTimer = null;
+        }, this.SAVE_DEBOUNCE_MS);
+    }
+
+    /**
+     * Immediately write database to disk.
+     */
+    private saveNow() {
         if (!this.db) return;
-        const data = this.db.export();
-        const buffer = Buffer.from(data);
-        fs.writeFileSync(this.dbPath, buffer);
-        logger.db.save();
+        try {
+            const data = this.db.export();
+            const buffer = Buffer.from(data);
+            fs.writeFileSync(this.dbPath, buffer);
+            logger.db.save();
+        } catch (err) {
+            logger.error(`❌ [DB] Failed to save: ${err}`);
+        }
+    }
+
+    /**
+     * Flush any pending debounced save immediately.
+     * Call this before app exit.
+     */
+    flushSave() {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+            this.saveNow();
+        }
     }
 
     getStorageDir(): string {
         return this.storageDir;
     }
-
-    // ==================== FLOORS ====================
 
     // ==================== FLOORS ====================
 
@@ -269,8 +307,6 @@ export class Database {
 
     // ==================== WAYPOINTS ====================
 
-    // ==================== WAYPOINTS ====================
-
     getWaypointsByFloor(floorId: number): Waypoint[] {
         if (!this.db) return [];
         const result = this.db.exec('SELECT * FROM waypoints WHERE floor_id = ?', [floorId]);
@@ -306,16 +342,8 @@ export class Database {
 
     // ==================== CONNECTIONS ====================
 
-    // ==================== CONNECTIONS ====================
-
     getConnectionsByFloor(floorId: number): Connection[] {
         if (!this.db) return [];
-        // Connections that belong to waypoints of this floor
-        // Since connections are edges between waypoints, we delete connections 
-        // linked to any waypoint on this floor to avoid orphans.
-        // But wait, connections can be inter-floor? No, usually not in this schema, 
-        // but 'connects_to_waypoint' implies strict graph.
-        // Let's assume connections are primarily stored per floor visualization.
         const result = this.db.exec(`
             SELECT c.* FROM connections c
             WHERE c.from_waypoint_id IN (SELECT id FROM waypoints WHERE floor_id = ?)
@@ -334,10 +362,6 @@ export class Database {
 
     clearConnectionsByFloor(floorId: number) {
         if (!this.db) return;
-        // Delete connections where EITHER start OR end is on this floor
-        // This is tricky if it deletes inter-floor connections, but usually 
-        // raw connections are purely coordinate-based on the map image.
-        // Inter-floor logic is handled by 'connects_to_waypoint' property of the waypoint itself.
         this.db.run(`
             DELETE FROM connections 
             WHERE from_waypoint_id IN (SELECT id FROM waypoints WHERE floor_id = ?)
@@ -360,8 +384,6 @@ export class Database {
 
     // ==================== ROOMS ====================
 
-    // ==================== ROOMS ====================
-
     getRooms(): Room[] {
         if (!this.db) return [];
         const result = this.db.exec('SELECT * FROM rooms ORDER BY name');
@@ -379,8 +401,8 @@ export class Database {
     searchRooms(query: string): Room[] {
         if (!this.db) return [];
         const result = this.db.exec(
-            "SELECT * FROM rooms WHERE name LIKE ? ORDER BY name LIMIT 20",
-            [`%${query}%`]
+            "SELECT * FROM rooms WHERE name LIKE ? OR keywords LIKE ? ORDER BY name LIMIT 20",
+            [`%${query}%`, `%${query}%`]
         );
         if (result.length === 0) return [];
         return this.mapResults<Room>(result[0]);
@@ -395,11 +417,11 @@ export class Database {
     upsertRooms(rooms: Room[]) {
         if (!this.db) return;
         const stmt = this.db.prepare(`
-            INSERT OR REPLACE INTO rooms (id, name, waypoint_id, floor_id)
-            VALUES (?, ?, ?, ?)
+            INSERT OR REPLACE INTO rooms (id, name, waypoint_id, floor_id, keywords)
+            VALUES (?, ?, ?, ?, ?)
         `);
         for (const r of rooms) {
-            stmt.run([r.id, r.name, r.waypoint_id, r.floor_id]);
+            stmt.run([r.id, r.name, r.waypoint_id, r.floor_id, r.keywords ?? null]);
         }
         stmt.free();
         this.save();
@@ -408,24 +430,15 @@ export class Database {
     cleanupOrphans() {
         if (!this.db) return;
 
-        // 1. Delete waypoints for non-existent floors
         this.db.run('DELETE FROM waypoints WHERE floor_id NOT IN (SELECT id FROM floors)');
-
-        // 2. Delete connections where either end point doesn't exist
         this.db.run('DELETE FROM connections WHERE from_waypoint_id NOT IN (SELECT id FROM waypoints)');
         this.db.run('DELETE FROM connections WHERE to_waypoint_id NOT IN (SELECT id FROM waypoints)');
-
-        // 3. Delete rooms for non-existent floors
         this.db.run('DELETE FROM rooms WHERE floor_id IS NOT NULL AND floor_id NOT IN (SELECT id FROM floors)');
-
-        // 4. Delete kiosks for non-existent floors
         this.db.run('DELETE FROM kiosks WHERE floor_id NOT IN (SELECT id FROM floors)');
 
         this.save();
         logger.info('🧹 [DB] Orphaned data cleaned up');
     }
-
-    // ==================== KIOSKS ====================
 
     // ==================== KIOSKS ====================
 
@@ -492,20 +505,58 @@ export class Database {
         });
     }
 
-    // ==================== OFFLINE PATHFINDING ====================
+    // ==================== PATHFINDING (A*) ====================
 
+    /**
+     * Find path between two rooms (offline).
+     * Delegates to findPathBetweenWaypoints after resolving room → waypoint.
+     */
     findPathOffline(startRoomId: number, endRoomId: number): NavigationResult | null {
         const startRoom = this.getRoom(startRoomId);
         const endRoom = this.getRoom(endRoomId);
 
         if (!startRoom?.waypoint_id || !endRoom?.waypoint_id) {
+            logger.warn(`⚠️ [NAV] Missing waypoint for rooms: start=${startRoomId}, end=${endRoomId}`);
             return null;
         }
 
+        return this.findPathBetweenWaypoints(startRoom.waypoint_id, endRoom.waypoint_id);
+    }
+
+    /**
+     * Find path from a kiosk to a room (offline).
+     */
+    findPathFromKiosk(kioskId: number, endRoomId: number): NavigationResult | null {
+        const kiosk = this.getKiosk(kioskId);
+        const endRoom = this.getRoom(endRoomId);
+
+        if (!kiosk?.waypoint_id || !endRoom?.waypoint_id) {
+            logger.warn(`⚠️ [NAV] Missing waypoint: kiosk=${kiosk?.waypoint_id}, room=${endRoom?.waypoint_id}`);
+            return null;
+        }
+
+        return this.findPathBetweenWaypoints(kiosk.waypoint_id, endRoom.waypoint_id);
+    }
+
+    /**
+     * Core A* pathfinding between two waypoints.
+     * Supports multi-floor navigation via stairs/elevator connections (bidirectional).
+     */
+    findPathBetweenWaypoints(startWaypointId: string, endWaypointId: string): NavigationResult | null {
         const waypoints = this.getAllWaypoints();
         const connections = this.getAllConnections();
 
+        logger.debug(`🧭 [NAV] Pathfinding: ${startWaypointId} -> ${endWaypointId} (${waypoints.length} waypoints, ${connections.length} connections)`);
+
         const waypointMap = new Map(waypoints.map(w => [w.id, w]));
+
+        const startWp = waypointMap.get(startWaypointId);
+        const endWp = waypointMap.get(endWaypointId);
+
+        if (!startWp || !endWp) {
+            logger.warn('⚠️ [NAV] Start or end waypoint not found in map');
+            return null;
+        }
 
         // Build adjacency list
         const adj = new Map<string, Array<{ id: string; distance: number }>>();
@@ -516,26 +567,24 @@ export class Database {
             adj.get(conn.to_waypoint_id)!.push({ id: conn.from_waypoint_id, distance: conn.distance });
         }
 
-        // Add vertical connections
+        // Add vertical connections (stairs/elevator) — bidirectional
         for (const wp of waypoints) {
             if ((wp.type === 'stairs' || wp.type === 'elevator') && wp.connects_to_waypoint) {
                 if (!adj.has(wp.id)) adj.set(wp.id, []);
                 adj.get(wp.id)!.push({ id: wp.connects_to_waypoint, distance: 50 });
+
+                if (!adj.has(wp.connects_to_waypoint)) adj.set(wp.connects_to_waypoint, []);
+                adj.get(wp.connects_to_waypoint)!.push({ id: wp.id, distance: 50 });
             }
         }
 
         // A* pathfinding
-        const startId = startRoom.waypoint_id;
-        const endId = endRoom.waypoint_id;
-        const endWp = waypointMap.get(endId);
-        if (!endWp) return null;
-
         const openSet = new Map<string, number>();
         const cameFrom = new Map<string, string>();
         const gScore = new Map<string, number>();
 
-        gScore.set(startId, 0);
-        openSet.set(startId, this.heuristic(waypointMap.get(startId)!, endWp));
+        gScore.set(startWaypointId, 0);
+        openSet.set(startWaypointId, this.heuristic(startWp, endWp));
 
         while (openSet.size > 0) {
             let current = '';
@@ -547,7 +596,8 @@ export class Database {
                 }
             }
 
-            if (current === endId) {
+            if (current === endWaypointId) {
+                logger.debug('✅ [NAV] Path found!');
                 return this.reconstructPath(cameFrom, current, gScore.get(current)!, waypointMap);
             }
 
@@ -567,6 +617,7 @@ export class Database {
             }
         }
 
+        logger.warn('⚠️ [NAV] No path found');
         return null;
     }
 
@@ -626,100 +677,5 @@ export class Database {
             case 'room': return wp.label ? `"${wp.label}" ga boring` : null;
             default: return null;
         }
-    }
-
-    // ==================== KIOSK PATHFINDING ====================
-
-    findPathFromKiosk(kioskId: number, endRoomId: number): NavigationResult | null {
-        const kiosk = this.getKiosk(kioskId);
-        const endRoom = this.getRoom(endRoomId);
-
-        if (!kiosk?.waypoint_id || !endRoom?.waypoint_id) {
-            console.log('Missing waypoint:', { kioskWaypoint: kiosk?.waypoint_id, roomWaypoint: endRoom?.waypoint_id });
-            return null;
-        }
-
-        return this.findPathBetweenWaypoints(kiosk.waypoint_id, endRoom.waypoint_id);
-    }
-
-    findPathBetweenWaypoints(startWaypointId: string, endWaypointId: string): NavigationResult | null {
-        const waypoints = this.getAllWaypoints();
-        const connections = this.getAllConnections();
-
-        console.log(`Pathfinding: ${startWaypointId} -> ${endWaypointId}`);
-        console.log(`Total waypoints: ${waypoints.length}, connections: ${connections.length}`);
-
-        const waypointMap = new Map(waypoints.map(w => [w.id, w]));
-
-        const startWp = waypointMap.get(startWaypointId);
-        const endWp = waypointMap.get(endWaypointId);
-
-        if (!startWp || !endWp) {
-            console.log('Waypoints not found in map');
-            return null;
-        }
-
-        // Build adjacency list
-        const adj = new Map<string, Array<{ id: string; distance: number }>>();
-        for (const conn of connections) {
-            if (!adj.has(conn.from_waypoint_id)) adj.set(conn.from_waypoint_id, []);
-            if (!adj.has(conn.to_waypoint_id)) adj.set(conn.to_waypoint_id, []);
-            adj.get(conn.from_waypoint_id)!.push({ id: conn.to_waypoint_id, distance: conn.distance });
-            adj.get(conn.to_waypoint_id)!.push({ id: conn.from_waypoint_id, distance: conn.distance });
-        }
-
-        // Add vertical connections (stairs/elevator)
-        for (const wp of waypoints) {
-            if ((wp.type === 'stairs' || wp.type === 'elevator') && wp.connects_to_waypoint) {
-                if (!adj.has(wp.id)) adj.set(wp.id, []);
-                // Bidirectional
-                adj.get(wp.id)!.push({ id: wp.connects_to_waypoint, distance: 50 });
-
-                if (!adj.has(wp.connects_to_waypoint)) adj.set(wp.connects_to_waypoint, []);
-                adj.get(wp.connects_to_waypoint)!.push({ id: wp.id, distance: 50 });
-            }
-        }
-
-        // A* pathfinding
-        const openSet = new Map<string, number>();
-        const cameFrom = new Map<string, string>();
-        const gScore = new Map<string, number>();
-
-        gScore.set(startWaypointId, 0);
-        openSet.set(startWaypointId, this.heuristic(startWp, endWp));
-
-        while (openSet.size > 0) {
-            let current = '';
-            let lowestF = Infinity;
-            for (const [id, f] of openSet) {
-                if (f < lowestF) {
-                    lowestF = f;
-                    current = id;
-                }
-            }
-
-            if (current === endWaypointId) {
-                console.log('Path found!');
-                return this.reconstructPath(cameFrom, current, gScore.get(current)!, waypointMap);
-            }
-
-            openSet.delete(current);
-            const neighbors = adj.get(current) || [];
-
-            for (const { id: neighborId, distance } of neighbors) {
-                const tentativeG = (gScore.get(current) ?? Infinity) + distance;
-
-                if (tentativeG < (gScore.get(neighborId) ?? Infinity)) {
-                    cameFrom.set(neighborId, current);
-                    gScore.set(neighborId, tentativeG);
-                    const neighborWp = waypointMap.get(neighborId);
-                    const f = tentativeG + (neighborWp ? this.heuristic(neighborWp, endWp) : 0);
-                    openSet.set(neighborId, f);
-                }
-            }
-        }
-
-        console.log('No path found');
-        return null;
     }
 }

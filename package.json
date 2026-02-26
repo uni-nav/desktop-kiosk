@@ -1,6 +1,6 @@
 {
     "name": "university-kiosk",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Universitet navigatsiya kiosk ilovasi",
     "main": "dist/main/main.js",
     "scripts": {
@@ -51,7 +51,12 @@
             "icon": "assets/icon.ico"
         },
         "nsis": {
-            "deleteAppDataOnUninstall": true
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "perMachine": true,
+            "allowElevation": true,
+            "deleteAppDataOnUninstall": true,
+            "uninstallDisplayName": "Universitet Kiosk"
         },
         "linux": {
             "target": "AppImage",

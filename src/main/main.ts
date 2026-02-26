@@ -6,6 +6,7 @@ app.commandLine.appendSwitch('ignore-certificate-errors', 'true');
 
 import * as path from 'path';
 import * as fs from 'fs';
+import * as https from 'https';
 import { Database } from './database';
 import { ApiSync } from './api-sync';
 import { logger } from './logger';
@@ -155,7 +156,7 @@ async function initialize() {
         });
 
         // Periodic auto-sync (best effort). Keeps offline DB fresh when internet exists.
-        const SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+        const SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
         if (syncInterval) clearInterval(syncInterval);
         syncInterval = setInterval(async () => {
             if (syncInProgress) return;
@@ -209,6 +210,10 @@ app.on('window-all-closed', () => {
             clearInterval(syncInterval);
             syncInterval = null;
         }
+        // Flush any pending debounced DB saves before quitting
+        if (database) {
+            database.flushSave();
+        }
         app.quit();
     }
 });
@@ -227,7 +232,7 @@ ipcMain.handle('setup-check-connection', async (_, url: string) => {
     }
 });
 
-import * as https from 'https';
+
 ipcMain.handle('setup-fetch-kiosks', async (_, url: string) => {
     try {
         const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
@@ -387,13 +392,7 @@ ipcMain.on('open-kiosk', (_event, kioskId: number) => {
     }
 });
 
-// Navigate back to launcher
-ipcMain.on('back-to-launcher', () => {
-    if (mainWindow) {
-        logger.window.loadPage('launcher.html');
-        mainWindow.loadFile(path.join(__dirname, '../renderer/launcher.html'));
-    }
-});
+
 
 // Toggle fullscreen
 ipcMain.on('toggle-fullscreen', () => {

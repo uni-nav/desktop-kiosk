@@ -23,7 +23,6 @@ interface KioskAPIInterface {
         SETUP_COMPLETED: boolean;
     }>;
     openKiosk: (id: number) => void;
-    backToLauncher: () => void;
     toggleFullscreen: () => void;
     log: {
         info: (msg: string) => void;

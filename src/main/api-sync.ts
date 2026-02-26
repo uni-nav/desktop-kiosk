@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as https from 'https';
+import * as crypto from 'crypto';
 import { Database } from './database';
 import { logger } from './logger';
 import * as path from 'path';
@@ -10,6 +11,9 @@ export class ApiSync {
     private db: Database;
     private online: boolean = false;
     private baseUrl: string;
+
+    /** In-memory hash cache to avoid re-syncing unchanged data */
+    private dataHashes: Map<string, string> = new Map();
 
     constructor(baseUrl: string, db: Database) {
         this.db = db;
@@ -28,7 +32,7 @@ export class ApiSync {
 
     async isOnline(): Promise<boolean> {
         try {
-            await this.client.get('/api/health');
+            await this.client.get('/api/health', { timeout: 5000 });
             this.online = true;
             return true;
         } catch {
@@ -37,21 +41,50 @@ export class ApiSync {
         }
     }
 
+    /**
+     * Compute a fast hash of JSON data to detect changes.
+     */
+    private hashData(data: any): string {
+        const json = JSON.stringify(data);
+        return crypto.createHash('md5').update(json).digest('hex');
+    }
+
+    /**
+     * Check if data has changed since last sync.
+     * Returns true if data is NEW or CHANGED, false if identical.
+     */
+    private hasChanged(key: string, data: any): boolean {
+        const newHash = this.hashData(data);
+        const oldHash = this.dataHashes.get(key);
+        if (oldHash === newHash) {
+            return false;
+        }
+        this.dataHashes.set(key, newHash);
+        return true;
+    }
+
     async syncFloors(): Promise<void> {
-        // 1. Fetch data
         const response = await this.client.get('/api/floors/');
         const newFloors = response.data;
 
-        // 2. Clear table (Fresh Start)
-        this.db.clearFloors();
+        if (!this.hasChanged('floors', newFloors)) {
+            logger.info('⏭️ [SYNC] Floors - o\'zgarmagan, skip');
+            return;
+        }
 
-        // 5. Insert
+        this.db.clearFloors();
         this.db.upsertFloors(newFloors);
         logger.sync.floors(newFloors.length);
     }
 
     async syncRooms(): Promise<void> {
         const response = await this.client.get('/api/rooms/');
+
+        if (!this.hasChanged('rooms', response.data)) {
+            logger.info('⏭️ [SYNC] Rooms - o\'zgarmagan, skip');
+            return;
+        }
+
         this.db.clearRooms();
         this.db.upsertRooms(response.data);
         logger.sync.rooms(response.data.length);
@@ -59,6 +92,12 @@ export class ApiSync {
 
     async syncKiosks(): Promise<void> {
         const response = await this.client.get('/api/kiosks/');
+
+        if (!this.hasChanged('kiosks', response.data)) {
+            logger.info('⏭️ [SYNC] Kiosks - o\'zgarmagan, skip');
+            return;
+        }
+
         this.db.clearKiosks();
         this.db.upsertKiosks(response.data);
         logger.sync.kiosks(response.data.length);
@@ -66,6 +105,12 @@ export class ApiSync {
 
     async syncWaypointsForFloor(floorId: number): Promise<void> {
         const response = await this.client.get(`/api/waypoints/floor/${floorId}`);
+
+        if (!this.hasChanged(`waypoints_${floorId}`, response.data)) {
+            logger.debug(`⏭️ [SYNC] Floor ${floorId} waypoints - o'zgarmagan, skip`);
+            return;
+        }
+
         this.db.clearWaypointsByFloor(floorId);
         this.db.upsertWaypoints(response.data);
         logger.sync.waypoints(floorId, response.data.length);
@@ -73,6 +118,12 @@ export class ApiSync {
 
     async syncConnectionsForFloor(floorId: number): Promise<void> {
         const response = await this.client.get(`/api/waypoints/connections/floor/${floorId}`);
+
+        if (!this.hasChanged(`connections_${floorId}`, response.data)) {
+            logger.debug(`⏭️ [SYNC] Floor ${floorId} connections - o'zgarmagan, skip`);
+            return;
+        }
+
         this.db.clearConnectionsByFloor(floorId);
         this.db.upsertConnections(response.data);
         logger.sync.connections(floorId, response.data.length);
@@ -86,25 +137,50 @@ export class ApiSync {
             throw new Error('Server is not reachable');
         }
 
-        // Sync core data
-        await this.syncFloors();
-        await this.syncFloorImages().catch((err) => {
-            logger.warn(`Floor image sync failed: ${err}`);
-        });
-        await this.syncRooms();
-        await this.syncKiosks();
+        // Sync core data — each wrapped in try/catch so one failure doesn't kill all
+        try {
+            await this.syncFloors();
+        } catch (err) {
+            logger.warn(`⚠️ [SYNC] Floors sync failed: ${err}`);
+        }
+
+        try {
+            await this.syncFloorImages();
+        } catch (err) {
+            logger.warn(`⚠️ [SYNC] Floor images sync failed: ${err}`);
+        }
+
+        try {
+            await this.syncRooms();
+        } catch (err) {
+            logger.warn(`⚠️ [SYNC] Rooms sync failed: ${err}`);
+        }
+
+        try {
+            await this.syncKiosks();
+        } catch (err) {
+            logger.warn(`⚠️ [SYNC] Kiosks sync failed: ${err}`);
+        }
 
         // Sync waypoints and connections for each floor
         const floors = this.db.getFloors();
         for (const floor of floors) {
-            await this.syncWaypointsForFloor(floor.id);
-            await this.syncConnectionsForFloor(floor.id);
+            try {
+                await this.syncWaypointsForFloor(floor.id);
+            } catch (err) {
+                logger.warn(`⚠️ [SYNC] Floor ${floor.id} waypoints failed: ${err}`);
+            }
+            try {
+                await this.syncConnectionsForFloor(floor.id);
+            } catch (err) {
+                logger.warn(`⚠️ [SYNC] Floor ${floor.id} connections failed: ${err}`);
+            }
         }
 
         // Update sync timestamp
         this.db.setSyncInfo('last_sync', new Date().toISOString());
 
-        // Cleanup orphaned data (ghosts)
+        // Cleanup orphaned data
         this.db.cleanupOrphans();
 
         logger.sync.success();
@@ -130,10 +206,18 @@ export class ApiSync {
             const filename = `floor_${floor.id}_${basename || 'image'}`;
             const targetPath = path.join(imagesDir, filename);
 
+            // Skip if image already exists locally
+            if (fs.existsSync(targetPath)) {
+                // Just ensure the DB path is set
+                this.db.setFloorLocalImagePath(floor.id, targetPath);
+                continue;
+            }
+
             try {
                 const resp = await this.client.get(imgUrl, { responseType: 'arraybuffer' });
                 fs.writeFileSync(targetPath, Buffer.from(resp.data));
                 this.db.setFloorLocalImagePath(floor.id, targetPath);
+                logger.info(`📥 [SYNC] Floor ${floor.id} image downloaded`);
             } catch (err) {
                 logger.warn(`Failed to download floor image (floor=${floor.id}): ${err}`);
             }
@@ -141,17 +225,14 @@ export class ApiSync {
     }
 
     async findPath(startRoomId: number, endRoomId: number, kioskId?: number): Promise<any> {
-        // Build request body - only include positive IDs
         const body: Record<string, number> = {
             end_room_id: endRoomId
         };
 
-        // Only add start_room_id if it's positive (not 0)
         if (startRoomId > 0) {
             body.start_room_id = startRoomId;
         }
 
-        // Add kiosk_id if provided
         if (kioskId && kioskId > 0) {
             body.kiosk_id = kioskId;
         }

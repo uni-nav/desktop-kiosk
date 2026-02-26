@@ -53,6 +53,7 @@ interface FloorRun {
 const ANIMATION_SPEED = 45; // reduced from 70px per second
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_ANIMATION_LOOPS = 3;
+const MAX_CACHED_IMAGES = 10; // Max floor images to keep in memory
 
 class KioskApp {
     private canvas: HTMLCanvasElement;
@@ -112,6 +113,18 @@ class KioskApp {
         this.kioskId = parseInt(params.get('kiosk_id') || '0');
 
         this.init();
+
+        // Cleanup on page unload — prevent memory leak
+        window.addEventListener('beforeunload', () => {
+            if (this.animationFrame) {
+                cancelAnimationFrame(this.animationFrame);
+                this.animationFrame = null;
+            }
+            if (this.idleTimer) {
+                window.clearTimeout(this.idleTimer);
+                this.idleTimer = null;
+            }
+        });
     }
 
     async init() {
@@ -376,6 +389,7 @@ class KioskApp {
             img.crossOrigin = 'anonymous';
             img.onload = () => {
                 this.floorImages.set(floor.id, img);
+                this.cleanupImageCache(floor.id);
                 resolve();
             };
             img.onerror = () => {
@@ -383,6 +397,23 @@ class KioskApp {
             };
             img.src = imageUrl;
         });
+    }
+
+    /**
+     * Cleanup image cache — keep only MAX_CACHED_IMAGES most recent.
+     * Always keeps the current floor image.
+     */
+    private cleanupImageCache(currentFloorId: number) {
+        if (this.floorImages.size <= MAX_CACHED_IMAGES) return;
+
+        const keys = Array.from(this.floorImages.keys());
+        // Remove oldest entries first, but never the current floor
+        for (const key of keys) {
+            if (this.floorImages.size <= MAX_CACHED_IMAGES) break;
+            if (key === currentFloorId) continue;
+            if (key === this.kioskFloorId) continue; // Never remove kiosk's own floor
+            this.floorImages.delete(key);
+        }
     }
 
     private toFileUrl(filePath: string): string {
@@ -520,11 +551,11 @@ class KioskApp {
                     }
                 }
             } else {
-                alert(result.error || "Yo'l topilmadi");
+                this.showToast(result.error || "Yo'l topilmadi", 'error');
             }
         } catch (error) {
             console.error('Path finding error:', error);
-            alert("Yo'l topishda xatolik yuz berdi");
+            this.showToast("Yo'l topishda xatolik yuz berdi", 'error');
         } finally {
             navigateBtn.disabled = false;
             navigateBtn.textContent = '🧭 Yo\'l ko\'rsatish';
@@ -1111,6 +1142,33 @@ class KioskApp {
             const label = this.selectedRoom?.name || "Manzil";
             this.drawEndMarker(ctx, pos, time, label);
         }
+    }
+
+    /**
+     * Show a toast notification instead of native alert().
+     * Auto-dismisses after 3 seconds.
+     */
+    showToast(message: string, type: 'error' | 'success' | 'info' = 'info') {
+        // Remove existing toast if any
+        const existing = document.getElementById('kiosk-toast');
+        if (existing) existing.remove();
+
+        const toast = document.createElement('div');
+        toast.id = 'kiosk-toast';
+        toast.className = `kiosk-toast kiosk-toast-${type}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+
+        // Trigger animation
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+
+        // Auto-dismiss after 3s
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 
 }

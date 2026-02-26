@@ -862,8 +862,43 @@ body {
     background: #64748b;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+/* ==================== TOAST NOTIFICATIONS ==================== */
+
+.kiosk-toast {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-100px);
+    padding: 14px 28px;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 500;
+    color: white;
+    z-index: 10000;
+    opacity: 0;
+    transition: all 0.3s ease;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    max-width: 80%;
+    text-align: center;
+}
+
+.kiosk-toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+.kiosk-toast-error {
+    background: linear-gradient(135deg, #dc2626, #991b1b);
+    border: 1px solid #f87171;
+}
+
+.kiosk-toast-success {
+    background: linear-gradient(135deg, #16a34a, #14532d);
+    border: 1px solid #4ade80;
+}
+
+.kiosk-toast-info {
+    background: linear-gradient(135deg, #2563eb, #1e3a8a);
+    border: 1px solid #60a5fa;
 }
