@@ -23,7 +23,7 @@
     --info: #0ea5e9;
 
     /* Sidebar width */
-    --sidebar-width: 380px;
+    --sidebar-width: 30vw;
 }
 
 * {
@@ -371,7 +371,7 @@ body {
 .sidebar {
     width: var(--sidebar-width);
     background: hsl(var(--card));
-    border-right: 1px solid hsl(var(--border));
+    border-left: 1px solid hsl(var(--border));
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
@@ -760,7 +760,7 @@ body {
 
 @media (max-width: 768px) {
     :root {
-        --sidebar-width: 220px;
+        --sidebar-width: 25vw;
     }
 
     .kiosk-header h1 {

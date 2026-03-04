@@ -1,5 +1,5 @@
 // src/main/main.ts
-import { app, BrowserWindow, ipcMain, Menu, powerSaveBlocker } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, powerSaveBlocker } from 'electron';
 
 // Bypass SSL certificate errors for internal kiosk communication
 app.commandLine.appendSwitch('ignore-certificate-errors', 'true');
@@ -18,6 +18,9 @@ let database: Database;
 let apiSync: ApiSync;
 let syncInterval: NodeJS.Timeout | null = null;
 let syncInProgress = false;
+let sleepBlockerId: number | null = null;
+let forceExitTimer: NodeJS.Timeout | null = null;
+let isShuttingDown = false;
 
 async function probeHealth(base: string): Promise<void> {
     await axios.get(`${base}/api/health`, { timeout: 5000 });
@@ -25,6 +28,113 @@ async function probeHealth(base: string): Promise<void> {
 
 // Load config
 const config = loadConfig();
+
+function clearSyncInterval() {
+    if (!syncInterval) return;
+    clearInterval(syncInterval);
+    syncInterval = null;
+}
+
+function flushDatabaseSave() {
+    if (database) {
+        database.flushSave();
+    }
+}
+
+function stopSleepBlocker() {
+    if (sleepBlockerId !== null && powerSaveBlocker.isStarted(sleepBlockerId)) {
+        powerSaveBlocker.stop(sleepBlockerId);
+    }
+    sleepBlockerId = null;
+}
+
+function cleanupBeforeExit() {
+    clearSyncInterval();
+    flushDatabaseSave();
+    stopSleepBlocker();
+}
+
+function requestAppExit(reason: string, options: { relaunch?: boolean; forceMs?: number } = {}) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logger.info(`🚪 [QUIT] ${reason}`);
+    cleanupBeforeExit();
+
+    try {
+        globalShortcut.unregisterAll();
+    } catch (err) {
+        logger.warn(`⚠️ [QUIT] Failed to unregister shortcuts: ${err}`);
+    }
+
+    if (options.relaunch) {
+        app.relaunch();
+    }
+
+    const forceMs = options.forceMs ?? 1500;
+    if (forceExitTimer) {
+        clearTimeout(forceExitTimer);
+    }
+    forceExitTimer = setTimeout(() => {
+        logger.warn(`⚠️ [QUIT] app.quit() timeout after ${forceMs}ms, forcing app.exit(0)`);
+        app.exit(0);
+    }, forceMs);
+
+    app.quit();
+}
+
+function isAdminQuitShortcut(input: Electron.Input): boolean {
+    const key = String(input.key || '').toLowerCase();
+    return (input.control || input.meta) && input.shift && (key === 'q' || key === 'f4');
+}
+
+function isFactoryResetShortcut(input: Electron.Input): boolean {
+    return (input.control || input.meta) && input.shift && input.key === 'Delete';
+}
+
+function handleFactoryReset() {
+    logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
+    const userDataPath = app.getPath('userData');
+    const configPath = path.join(userDataPath, 'config.json');
+
+    try {
+        if (fs.existsSync(configPath)) {
+            fs.unlinkSync(configPath);
+            logger.info('🗑️ [RESET] Config file deleted');
+        }
+        requestAppExit('Factory reset relaunch requested', { relaunch: true });
+    } catch (err) {
+        logger.error(`❌ [RESET] Failed to reset: ${err}`);
+    }
+}
+
+function handleAdminShortcut(input: Electron.Input): boolean {
+    if (isAdminQuitShortcut(input)) {
+        logger.info('🚪 [QUIT] Admin quit triggered by Ctrl+Shift+F4/Ctrl+Shift+Q');
+        requestAppExit('Admin quit shortcut');
+        return true;
+    }
+
+    if (isFactoryResetShortcut(input)) {
+        handleFactoryReset();
+        return true;
+    }
+
+    return false;
+}
+
+function registerAdminGlobalShortcuts() {
+    const adminQuitShortcuts = ['CommandOrControl+Shift+F4', 'CommandOrControl+Shift+Q'];
+    for (const shortcut of adminQuitShortcuts) {
+        const ok = globalShortcut.register(shortcut, () => {
+            logger.info(`🚪 [QUIT] Global shortcut triggered: ${shortcut}`);
+            requestAppExit(`Global shortcut ${shortcut}`);
+        });
+        if (!ok) {
+            logger.warn(`⚠️ [QUIT] Could not register global shortcut: ${shortcut}`);
+        }
+    }
+}
 
 function createWindow() {
     logger.window.created();
@@ -56,22 +166,7 @@ function createWindow() {
 
         // Block keyboard shortcuts (except F11/DevTools if debug enabled)
         mainWindow.webContents.on('before-input-event', (event, input) => {
-            // Allow Factory Reset (Ctrl+Shift+Delete or Cmd+Shift+Delete) even in Kiosk mode
-            if ((input.control || input.meta) && input.shift && input.key === 'Delete') {
-                logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
-                const userDataPath = app.getPath('userData');
-                const configPath = path.join(userDataPath, 'config.json');
-
-                try {
-                    if (fs.existsSync(configPath)) {
-                        fs.unlinkSync(configPath);
-                        logger.info('🗑️ [RESET] Config file deleted');
-                    }
-                    app.relaunch();
-                    app.exit(0);
-                } catch (err) {
-                    logger.error(`❌ [RESET] Failed to reset: ${err}`);
-                }
+            if (handleAdminShortcut(input)) {
                 return;
             }
 
@@ -87,22 +182,10 @@ function createWindow() {
             }
         });
     } else {
-        // Non-Kiosk Mode: Still allow Factory Reset
+        // Non-Kiosk Mode: Allow Factory Reset and Admin Quit
         mainWindow.webContents.on('before-input-event', (event, input) => {
-            if ((input.control || input.meta) && input.shift && input.key === 'Delete') {
-                logger.info('⚠️ [RESET] Factory reset triggered by shortcuts');
-                const userDataPath = app.getPath('userData');
-                const configPath = path.join(userDataPath, 'config.json');
-
-                try {
-                    if (fs.existsSync(configPath)) {
-                        fs.unlinkSync(configPath);
-                    }
-                    app.relaunch();
-                    app.exit(0);
-                } catch (err) {
-                    logger.error(`❌ [RESET] Failed to reset: ${err}`);
-                }
+            if (handleAdminShortcut(input)) {
+                return;
             }
         });
     }
@@ -181,7 +264,7 @@ async function initialize() {
 app.whenReady().then(async () => {
     // 24/7 Kiosk features: Prevent Sleep and start on boot
     if (config.KIOSK_MODE) {
-        powerSaveBlocker.start('prevent-display-sleep');
+        sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
         try {
             app.setLoginItemSettings({
                 openAtLogin: true,
@@ -193,6 +276,7 @@ app.whenReady().then(async () => {
         }
     }
 
+    registerAdminGlobalShortcuts();
     await initialize();
     createWindow();
 
@@ -205,17 +289,20 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
-        logger.app.quit();
-        if (syncInterval) {
-            clearInterval(syncInterval);
-            syncInterval = null;
-        }
-        // Flush any pending debounced DB saves before quitting
-        if (database) {
-            database.flushSave();
-        }
-        app.quit();
+        requestAppExit('All windows closed');
     }
+});
+
+app.on('before-quit', () => {
+    cleanupBeforeExit();
+});
+
+app.on('will-quit', () => {
+    if (forceExitTimer) {
+        clearTimeout(forceExitTimer);
+        forceExitTimer = null;
+    }
+    globalShortcut.unregisterAll();
 });
 
 // ==================== IPC HANDLERS ====================
@@ -268,8 +355,7 @@ ipcMain.handle('setup-save-config', async (_, apiUrl: string, kioskId: number, k
         DEBUG_MODE: !!debugMode,
         SETUP_COMPLETED: true
     });
-    app.relaunch();
-    app.quit();
+    requestAppExit('Setup saved, relaunching app', { relaunch: true });
 });
 
 // Get all kiosks

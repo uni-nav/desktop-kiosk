@@ -314,7 +314,7 @@ class KioskApp {
         tabsContainer.innerHTML = this.floors.map(floor => `
             <button class="floor-tab ${floor === this.currentFloor ? 'active' : ''}" 
                     data-floor-id="${floor.id}">
-                ${floor.floor_number}-qavat
+                ${floor.name}
             </button>
         `).join('');
 
@@ -333,6 +333,9 @@ class KioskApp {
         const requestId = ++this.floorSelectRequestId;
         this.currentFloor = floor;
         this.renderFloorTabs();
+
+        // Update header with floor name
+        document.getElementById('kiosk-name')!.textContent = floor.name;
 
         // Show loading
         document.getElementById('map-loading')!.classList.remove('hidden');

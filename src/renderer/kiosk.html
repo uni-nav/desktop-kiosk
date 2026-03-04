@@ -17,7 +17,15 @@
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Left Sidebar -->
+            <!-- Map Container -->
+            <main class="map-container">
+                <canvas id="map-canvas"></canvas>
+                <div id="map-loading" class="map-loading hidden">
+                    <div class="spinner"></div>
+                </div>
+            </main>
+
+            <!-- Right Sidebar -->
             <aside class="sidebar">
                 <!-- Filter Section -->
                 <div class="sidebar-section filter-section">
@@ -60,14 +68,6 @@
                 <!-- Floor Tabs -->
                 <nav id="floor-tabs" class="floor-tabs-sidebar"></nav>
             </aside>
-
-            <!-- Map Container -->
-            <main class="map-container">
-                <canvas id="map-canvas"></canvas>
-                <div id="map-loading" class="map-loading hidden">
-                    <div class="spinner"></div>
-                </div>
-            </main>
         </div>
 
         <!-- Welcome Modal -->
