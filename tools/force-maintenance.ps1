@@ -78,57 +78,206 @@ function Test-KioskPolicyPresent {
 function Stop-KioskProcesses {
     $processNames = @(
         "Universitet Kiosk.exe",
+        "University Kiosk.exe",
         "university-kiosk.exe",
         "electron.exe",
         "crashpad_handler.exe"
     )
 
-    foreach ($name in $processNames) {
-        taskkill /F /T /IM $name | Out-Null
+    $checkNames = @(
+        "Universitet Kiosk",
+        "University Kiosk",
+        "university-kiosk",
+        "electron",
+        "crashpad_handler"
+    )
+
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        foreach ($name in $processNames) {
+            taskkill /F /T /IM $name | Out-Null
+        }
+
+        Start-Sleep -Seconds 1
+
+        $stillRunning = $false
+        foreach ($checkName in $checkNames) {
+            if (Get-Process -Name $checkName -ErrorAction SilentlyContinue) {
+                $stillRunning = $true
+                break
+            }
+        }
+
+        if (-not $stillRunning) {
+            return
+        }
     }
 }
 
-function Find-UninstallString {
+function Remove-KioskAutoStartEntries {
+    $runPaths = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
+    )
+    $entryNames = @(
+        "Universitet Kiosk",
+        "University Kiosk",
+        "university-kiosk",
+        "Universitet Kiosk.exe",
+        "university-kiosk.exe"
+    )
+
+    foreach ($path in $runPaths) {
+        foreach ($name in $entryNames) {
+            Remove-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-KioskRegistryEntries {
     $paths = @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
         "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
     )
 
+    $items = @()
     foreach ($path in $paths) {
-        $entry = Get-ItemProperty -Path $path | Where-Object {
+        $items += Get-ItemProperty -Path $path | Where-Object {
             $_.DisplayName -like "*Universitet Kiosk*" -or $_.DisplayName -like "*university-kiosk*"
-        } | Select-Object -First 1
+        }
+    }
+    return $items
+}
 
-        if ($entry -and $entry.UninstallString) {
-            return $entry.UninstallString
+function Resolve-KioskExecutablePath {
+    $entries = Get-KioskRegistryEntries
+    $exeNames = @(
+        "Universitet Kiosk.exe",
+        "University Kiosk.exe",
+        "university-kiosk.exe"
+    )
+
+    foreach ($entry in $entries) {
+        if ($entry.InstallLocation -and (Test-Path -LiteralPath $entry.InstallLocation)) {
+            foreach ($exeName in $exeNames) {
+                $candidate = Join-Path $entry.InstallLocation $exeName
+                if (Test-Path -LiteralPath $candidate) {
+                    return $candidate
+                }
+            }
+        }
+    }
+
+    foreach ($entry in $entries) {
+        if ($entry.DisplayIcon) {
+            $iconPath = [string]$entry.DisplayIcon
+            $iconPath = $iconPath.Split(',')[0].Trim('"')
+            if (Test-Path -LiteralPath $iconPath) {
+                return $iconPath
+            }
         }
     }
 
     return $null
 }
 
-function Run-Uninstall($uninstallString) {
-    if (-not $uninstallString) {
-        Write-Host "UninstallString not found in registry."
+function Request-InAppMaintenanceMode([string]$ModeFlag) {
+    $exePath = Resolve-KioskExecutablePath
+    if (-not $exePath) {
         return
     }
 
-    $cmd = $uninstallString
-    if ($cmd -notmatch "(^| )/S($| )") {
-        $cmd = "$cmd /S"
+    try {
+        Write-Host "Requesting in-app maintenance: $ModeFlag"
+        Start-Process -FilePath $exePath -ArgumentList $ModeFlag -WindowStyle Hidden | Out-Null
+        Start-Sleep -Seconds 2
     }
-    if ($cmd -notmatch "(^| )/allusers($| )") {
-        $cmd = "$cmd /allusers"
+    catch {
+        Write-Host "In-app maintenance request failed: $($_.Exception.Message)"
+    }
+}
+
+function Find-UninstallCommand {
+    $entries = Get-KioskRegistryEntries
+    foreach ($entry in $entries) {
+
+        if ($entry) {
+            if ($entry.QuietUninstallString) {
+                return [string]$entry.QuietUninstallString
+            }
+            if ($entry.UninstallString) {
+                return [string]$entry.UninstallString
+            }
+        }
+    }
+
+    return $null
+}
+
+function Split-CommandLine {
+    param([string]$CommandLine)
+
+    $line = ($CommandLine | Out-String).Trim()
+    if (-not $line) {
+        throw "Empty uninstall command."
+    }
+
+    if ($line.StartsWith('"')) {
+        $endQuote = $line.IndexOf('"', 1)
+        if ($endQuote -lt 1) {
+            throw "Invalid quoted command: $line"
+        }
+        $filePath = $line.Substring(1, $endQuote - 1)
+        $args = $line.Substring($endQuote + 1).Trim()
+    } else {
+        $parts = $line.Split(' ', 2)
+        $filePath = $parts[0]
+        $args = if ($parts.Count -gt 1) { $parts[1] } else { "" }
+    }
+
+    return [PSCustomObject]@{
+        FilePath = $filePath
+        Arguments = $args
+    }
+}
+
+function Run-Uninstall($uninstallCommand) {
+    if (-not $uninstallCommand) {
+        Write-Host "Uninstall command not found in registry."
+        return 0
+    }
+
+    $parsed = Split-CommandLine -CommandLine $uninstallCommand
+    $exePath = $parsed.FilePath
+    $args = [string]$parsed.Arguments
+
+    if (-not [System.IO.Path]::GetExtension($exePath)) {
+        $resolved = (Get-Command $exePath -ErrorAction SilentlyContinue)
+        if ($resolved) {
+            $exePath = $resolved.Source
+        }
+    }
+
+    if ($args -notmatch "(^| )/S($| )") {
+        $args = "$args /S".Trim()
+    }
+    if ($args -notmatch "(^| )/allusers($| )") {
+        $args = "$args /allusers".Trim()
     }
 
     Write-Host "Running uninstall command..."
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c $cmd" -Wait
+    Write-Host "Executable: $exePath"
+    Write-Host "Arguments : $args"
+    $proc = Start-Process -FilePath $exePath -ArgumentList $args -Wait -PassThru
+    return $proc.ExitCode
 }
 
 Ensure-Admin
+Request-InAppMaintenanceMode -ModeFlag "--prepare-uninstall"
 Write-Host "Stopping kiosk and disabling Assigned Access..."
 Disable-KioskPolicies
+Remove-KioskAutoStartEntries
 Stop-KioskProcesses
 
 if (Test-KioskPolicyPresent) {
@@ -137,10 +286,14 @@ if (Test-KioskPolicyPresent) {
     exit 3
 }
 
-$uninstallString = Find-UninstallString
-Run-Uninstall -uninstallString $uninstallString
+$uninstallCommand = Find-UninstallCommand
+$exitCode = Run-Uninstall -uninstallCommand $uninstallCommand
+if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+    Write-Host "Uninstall returned exit code: $exitCode"
+}
 
 Write-Host "Final process cleanup..."
+Remove-KioskAutoStartEntries
 Stop-KioskProcesses
 
 Write-Host "Done."

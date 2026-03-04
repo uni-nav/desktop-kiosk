@@ -75,7 +75,9 @@ cp .env.example .env
 `.env` ni tahrirlang:
 
 ```env
-API_URL=http://3.77.140.158:8000
+API_URL=https://map.ranch.university/api
+ALLOW_INSECURE_TLS=false
+ADMIN_SHORTCUTS_ENABLED=false
 ```
 
 ## 🔧 Ishga Tushirish

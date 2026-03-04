@@ -26,17 +26,26 @@ fetchKiosksBtn.addEventListener('click', async () => {
     try {
         const kiosks = await setupAPI.fetchKiosks(rawUrl);
 
-        kioskListSelect.innerHTML = '<option value="">Kioskni tanlang...</option>';
+        kioskListSelect.replaceChildren();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Kioskni tanlang...';
+        kioskListSelect.appendChild(placeholder);
+
         kiosks.forEach((k: any) => {
             const opt = document.createElement('option');
-            opt.value = k.id;
+            opt.value = String(k.id);
             opt.textContent = `[ID: ${k.id}] ${k.name || 'Nomsiz Kiosk'} (${k.status || 'Noma\'lum'})`;
             kioskListSelect.appendChild(opt);
         });
         showSuccess(`Muvaffaqiyatli ${kiosks.length} ta kiosk yuklandi!`);
     } catch (err: any) {
         showError('Kiosklarni yuklash xatosi: ' + err.message);
-        kioskListSelect.innerHTML = '<option value="">Tur tarmoqqa yoki manzilga bog\'lanishda xato!</option>';
+        kioskListSelect.replaceChildren();
+        const errorOption = document.createElement('option');
+        errorOption.value = '';
+        errorOption.textContent = 'Tur tarmoqqa yoki manzilga bog\'lanishda xato!';
+        kioskListSelect.appendChild(errorOption);
     } finally {
         fetchKiosksBtn.disabled = false;
         fetchKiosksBtn.textContent = 'Yuklash';

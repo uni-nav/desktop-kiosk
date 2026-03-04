@@ -11,23 +11,32 @@ export class ApiSync {
     private db: Database;
     private online: boolean = false;
     private baseUrl: string;
+    private allowInsecureTls: boolean;
 
     /** In-memory hash cache to avoid re-syncing unchanged data */
     private dataHashes: Map<string, string> = new Map();
 
-    constructor(baseUrl: string, db: Database) {
+    constructor(baseUrl: string, db: Database, allowInsecureTls: boolean = false) {
         this.db = db;
+        this.allowInsecureTls = allowInsecureTls;
         this.baseUrl = baseUrl.replace(/\/+$/, '').replace(/\/api$/i, '');
-        this.client = axios.create({
+        const clientConfig: {
+            baseURL: string;
+            timeout: number;
+            headers: Record<string, string>;
+            httpsAgent?: https.Agent;
+        } = {
             baseURL: this.baseUrl,
             timeout: 10000,
             headers: {
                 'Content-Type': 'application/json'
-            },
-            httpsAgent: new https.Agent({
-                rejectUnauthorized: false
-            })
-        });
+            }
+        };
+        if (this.allowInsecureTls && this.baseUrl.startsWith('https://')) {
+            clientConfig.httpsAgent = new https.Agent({ rejectUnauthorized: false });
+            logger.warn('⚠️ [SYNC] ALLOW_INSECURE_TLS=true. TLS certificate checks are disabled.');
+        }
+        this.client = axios.create(clientConfig);
     }
 
     async isOnline(): Promise<boolean> {
@@ -203,21 +212,23 @@ export class ApiSync {
                 : `${this.baseUrl}${floor.image_url.startsWith('/') ? '' : '/'}${floor.image_url}`;
 
             const basename = path.basename(String(floor.image_url).split('?')[0]);
-            const filename = `floor_${floor.id}_${basename || 'image'}`;
+            const safeBaseName = (basename || 'image').replace(/[^a-zA-Z0-9._-]/g, '_');
+            const filename = `floor_${floor.id}_${safeBaseName}`;
             const targetPath = path.join(imagesDir, filename);
 
-            // Skip if image already exists locally
-            if (fs.existsSync(targetPath)) {
-                // Just ensure the DB path is set
-                this.db.setFloorLocalImagePath(floor.id, targetPath);
-                continue;
-            }
-
             try {
-                const resp = await this.client.get(imgUrl, { responseType: 'arraybuffer' });
+                const resp = await this.client.get(imgUrl, {
+                    responseType: 'arraybuffer',
+                    headers: { 'Cache-Control': 'no-cache' }
+                });
                 fs.writeFileSync(targetPath, Buffer.from(resp.data));
+
+                if (floor.local_image_path && floor.local_image_path !== targetPath && fs.existsSync(floor.local_image_path)) {
+                    fs.unlinkSync(floor.local_image_path);
+                }
+
                 this.db.setFloorLocalImagePath(floor.id, targetPath);
-                logger.info(`📥 [SYNC] Floor ${floor.id} image downloaded`);
+                logger.info(`📥 [SYNC] Floor ${floor.id} image refreshed`);
             } catch (err) {
                 logger.warn(`Failed to download floor image (floor=${floor.id}): ${err}`);
             }

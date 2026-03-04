@@ -50,7 +50,8 @@ interface FloorRun {
 }
 
 // Constants
-const ANIMATION_SPEED = 45; // reduced from 70px per second
+const ANIMATION_RATE = 0.75;
+const ANIMATION_SPEED = 45 * ANIMATION_RATE;
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const DEFAULT_ANIMATION_LOOPS = 3;
 const MAX_CACHED_IMAGES = 10; // Max floor images to keep in memory
@@ -112,7 +113,7 @@ class KioskApp {
         const params = new URLSearchParams(window.location.search);
         this.kioskId = parseInt(params.get('kiosk_id') || '0');
 
-        this.init();
+        void this.init().catch((error) => this.handleInitError(error));
 
         // Cleanup on page unload — prevent memory leak
         window.addEventListener('beforeunload', () => {
@@ -168,6 +169,12 @@ class KioskApp {
         if (startFloor) {
             await this.selectFloor(startFloor);
         }
+    }
+
+    private handleInitError(error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        kioskAPI.log.error(`Init failed: ${message}`);
+        this.showToast("Ilovani ishga tushirishda xatolik yuz berdi", 'error');
     }
 
     setupEventListeners() {
@@ -311,21 +318,21 @@ class KioskApp {
 
     renderFloorTabs() {
         const tabsContainer = document.getElementById('floor-tabs')!;
-        tabsContainer.innerHTML = this.floors.map(floor => `
-            <button class="floor-tab ${floor === this.currentFloor ? 'active' : ''}" 
-                    data-floor-id="${floor.id}">
-                ${floor.name}
-            </button>
-        `).join('');
+        tabsContainer.replaceChildren();
 
-        tabsContainer.querySelectorAll('.floor-tab').forEach(tab => {
-            tab.addEventListener('click', async () => {
-                const floorId = parseInt(tab.getAttribute('data-floor-id')!);
-                const floor = this.floors.find(f => f.id === floorId);
-                if (floor) {
-                    await this.selectFloor(floor);
+        this.floors.forEach((floor) => {
+            const button = document.createElement('button');
+            button.className = `floor-tab ${floor === this.currentFloor ? 'active' : ''}`;
+            button.dataset.floorId = floor.id.toString();
+            button.textContent = floor.name;
+            button.addEventListener('click', async () => {
+                const floorId = Number(button.dataset.floorId);
+                const selectedFloor = this.floors.find(f => f.id === floorId);
+                if (selectedFloor) {
+                    await this.selectFloor(selectedFloor);
                 }
             });
+            tabsContainer.appendChild(button);
         });
     }
 
@@ -430,32 +437,40 @@ class KioskApp {
 
         if (query.length < 2) {
             resultsContainer.classList.add('hidden');
+            resultsContainer.replaceChildren();
             return;
         }
 
         const results = await kioskAPI.searchRooms(query);
+        resultsContainer.replaceChildren();
 
         if (results.length === 0) {
-            resultsContainer.innerHTML = '<div class="search-result-item"><span class="name">Natija topilmadi</span></div>';
+            const emptyItem = document.createElement('div');
+            emptyItem.className = 'search-result-item';
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = 'Natija topilmadi';
+            emptyItem.appendChild(name);
+            resultsContainer.appendChild(emptyItem);
         } else {
-            resultsContainer.innerHTML = results.map(room => {
+            results.forEach((room) => {
                 const floor = this.floors.find(f => f.id === room.floor_id);
-                return `
-                    <div class="search-result-item" data-room-id="${room.id}">
-                        <span class="name">${room.name}</span>
-                        <span class="floor">${floor ? floor.floor_number + '-qavat' : ''}</span>
-                    </div>
-                `;
-            }).join('');
+                const item = document.createElement('div');
+                item.className = 'search-result-item';
+                item.dataset.roomId = room.id.toString();
 
-            resultsContainer.querySelectorAll('.search-result-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    const roomId = parseInt(item.getAttribute('data-room-id')!);
-                    const room = results.find(r => r.id === roomId);
-                    if (room) {
-                        this.selectRoom(room);
-                    }
-                });
+                const nameEl = document.createElement('span');
+                nameEl.className = 'name';
+                nameEl.textContent = room.name;
+
+                const floorEl = document.createElement('span');
+                floorEl.className = 'floor';
+                floorEl.textContent = floor ? `${floor.floor_number}-qavat` : '';
+
+                item.appendChild(nameEl);
+                item.appendChild(floorEl);
+                item.addEventListener('click', () => this.selectRoom(room));
+                resultsContainer.appendChild(item);
             });
         }
 
@@ -596,10 +611,8 @@ class KioskApp {
     }
 
     showTextDirections(info: NavigationResult) {
-        const directionsEl = document.getElementById('directions-list')!;
-
         if (info.path.length === 0) {
-            directionsEl.innerHTML = '<div class="empty-directions">Xona tanlang va yo\'l qidiring</div>';
+            this.renderDirections([]);
             return;
         }
 
@@ -638,7 +651,7 @@ class KioskApp {
             }
         }
 
-        directionsEl.innerHTML = directions.map(d => `<div class="direction-item">${d}</div>`).join('');
+        this.renderDirections(directions);
     }
 
     clearPath() {
@@ -649,7 +662,27 @@ class KioskApp {
         this.animationProgress = 0;
         this.animationLoopCount = 0;
         document.getElementById('path-info')!.classList.add('hidden');
-        document.getElementById('directions-list')!.innerHTML = '<div class="empty-directions">Xona tanlang va yo\'l qidiring</div>';
+        this.renderDirections([]);
+    }
+
+    private renderDirections(directions: string[]) {
+        const directionsEl = document.getElementById('directions-list')!;
+        directionsEl.replaceChildren();
+
+        if (directions.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'empty-directions';
+            empty.textContent = "Xona tanlang va yo'l qidiring";
+            directionsEl.appendChild(empty);
+            return;
+        }
+
+        directions.forEach((direction) => {
+            const item = document.createElement('div');
+            item.className = 'direction-item';
+            item.textContent = direction;
+            directionsEl.appendChild(item);
+        });
     }
 
     async syncData() {
@@ -760,7 +793,7 @@ class KioskApp {
         ctx.shadowBlur = 10;
 
         // Flow speed
-        const offset = -(time / 10) % 40; // 40px pattern
+        const offset = -((time * ANIMATION_RATE) / 10) % 40; // 40px pattern
 
         ctx.setLineDash([10, 30]); // Short opaque dash, long gap
         ctx.lineDashOffset = offset;
@@ -778,83 +811,63 @@ class KioskApp {
         ctx.save();
         ctx.translate(pos.x, pos.y);
 
-        // Calculate rotation/orientation
-        // DO NOT rotate the full canvas, or the person will be upside down going left.
-        // Instead, just flip horizontally if moving left.
-        let isMovingLeft = false;
-        if (nextPos) {
-            const dx = nextPos.x - pos.x;
-            if (dx < 0) isMovingLeft = true;
-        }
-
-        if (isMovingLeft) {
-            ctx.scale(-1, 1);
-        }
-
-        // WALKING MAN ANIMATION (Side View / Billboard style)
-        // Since we rotate the canvas to align with the path, drawing a "Side View" man 
-        // effectively looks like he is walking along the line on the floor.
-
         const time = performance.now();
-        const cycle = (time / 400) % (Math.PI * 2); // Walking cycle speed
+        const pulse = (Math.sin((time * ANIMATION_RATE) / 180) + 1) / 2;
+        const bob = Math.sin((time * ANIMATION_RATE) / 220) * 1.1;
 
-        // Colors
-        ctx.fillStyle = this.colors.blue;
-        ctx.strokeStyle = this.colors.white;
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 5;
+        let angle = 0;
+        if (nextPos) {
+            angle = Math.atan2(nextPos.y - pos.y, nextPos.x - pos.x);
+        }
+        ctx.rotate(angle);
 
-        // Bouncing body
-        const bounce = Math.abs(Math.sin(cycle * 2)) * 2;
-
-        // --- DRAWING THE MAN (Facing Right relative to path) ---
-        // Scale him up a bit
-        const s = 1.2;
-
-        // 1. LEGS
-        // Right Leg (Back)
-        const rightLegAngle = Math.sin(cycle) * 0.8;
+        // Soft glow under the navigator for better visibility on complex maps
+        const glowRadius = 14 + pulse * 5;
+        const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, glowRadius);
+        glow.addColorStop(0, 'rgba(45, 212, 191, 0.32)');
+        glow.addColorStop(1, 'rgba(45, 212, 191, 0)');
+        ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.moveTo(0, 0 - bounce); // Hip
-        ctx.lineTo(Math.sin(rightLegAngle) * 12 * s, (Math.cos(rightLegAngle) * 12 * s) - bounce); // Foot
-        ctx.stroke();
-
-        // Left Leg (Front)
-        const leftLegAngle = Math.sin(cycle + Math.PI) * 0.8;
-        ctx.beginPath();
-        ctx.moveTo(0, 0 - bounce); // Hip
-        ctx.lineTo(Math.sin(leftLegAngle) * 12 * s, (Math.cos(leftLegAngle) * 12 * s) - bounce); // Foot
-        ctx.stroke();
-
-        // 2. BODY
-        ctx.beginPath();
-        ctx.moveTo(0, 0 - bounce); // Hip
-        ctx.lineTo(2 * s, -14 * s - bounce); // Neck (slightly forward lean)
-        ctx.stroke();
-
-        // 3. ARMS
-        // Right Arm (Back) - swings opposite to right leg
-        const rightArmAngle = Math.sin(cycle + Math.PI) * 0.6;
-        ctx.beginPath();
-        ctx.moveTo(2 * s, -12 * s - bounce); // Shoulder
-        ctx.lineTo(Math.sin(rightArmAngle) * 10 * s + 2, (Math.cos(rightArmAngle) * 10 * s) - 12 - bounce); // Hand
-        ctx.stroke();
-
-        // 3. HEAD
-        ctx.beginPath();
-        ctx.fillStyle = this.colors.blue;
-        ctx.arc(3 * s, -16 * s - bounce, 3.5 * s, 0, Math.PI * 2);
+        ctx.arc(0, 0, glowRadius, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.save();
+        ctx.translate(0, bob);
+
+        // Main body (rounded capsule)
+        ctx.beginPath();
+        ctx.roundRect(-12, -8, 22, 16, 8);
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = this.colors.cyan;
         ctx.stroke();
 
-        // 4. Left Arm (Front)
-        const leftArmAngle = Math.sin(cycle) * 0.6;
+        // Direction chevron
+        const headGradient = ctx.createLinearGradient(2, -6, 14, 6);
+        headGradient.addColorStop(0, '#67e8f9');
+        headGradient.addColorStop(1, '#22d3ee');
+        ctx.fillStyle = headGradient;
         ctx.beginPath();
-        ctx.moveTo(2 * s, -12 * s - bounce); // Shoulder
-        ctx.lineTo(Math.sin(leftArmAngle) * 10 * s + 2, (Math.cos(leftArmAngle) * 10 * s) - 12 - bounce); // Hand
+        ctx.moveTo(3, -6);
+        ctx.lineTo(14, 0);
+        ctx.lineTo(3, 6);
+        ctx.closePath();
+        ctx.fill();
+
+        // Center anchor point
+        ctx.beginPath();
+        ctx.fillStyle = this.colors.white;
+        ctx.arc(-4, 0, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+
+        // Outer pulse ring
+        ctx.beginPath();
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = `rgba(255,255,255,${0.35 + pulse * 0.25})`;
+        ctx.arc(0, 0, 9.5 + pulse * 2.5, 0, Math.PI * 2);
         ctx.stroke();
 
         ctx.restore();
@@ -1202,7 +1215,7 @@ class VirtualKeyboard {
     }
 
     private render() {
-        this.container.innerHTML = '';
+        this.container.replaceChildren();
 
         this.layout.forEach(row => {
             const rowDiv = document.createElement('div');
@@ -1216,7 +1229,7 @@ class VirtualKeyboard {
 
                 if (key === 'SPACE') {
                     btn.classList.add('space');
-                    btn.innerHTML = '&nbsp;'; // Non-breaking space for height
+                    btn.textContent = ' '; // Visible blank key without HTML
                 } else if (key === '⌫' || key === '⏎') {
                     btn.classList.add('special');
                 }

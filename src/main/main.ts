@@ -1,8 +1,5 @@
 // src/main/main.ts
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, powerSaveBlocker } from 'electron';
-
-// Bypass SSL certificate errors for internal kiosk communication
-app.commandLine.appendSwitch('ignore-certificate-errors', 'true');
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, powerSaveBlocker } from 'electron';
 
 import * as path from 'path';
 import * as fs from 'fs';
@@ -21,13 +18,60 @@ let syncInProgress = false;
 let sleepBlockerId: number | null = null;
 let forceExitTimer: NodeJS.Timeout | null = null;
 let isShuttingDown = false;
-
-async function probeHealth(base: string): Promise<void> {
-    await axios.get(`${base}/api/health`, { timeout: 5000 });
-}
+let maintenanceRequested = false;
 
 // Load config
 const config = loadConfig();
+const insecureHttpsAgent = new https.Agent({ rejectUnauthorized: false });
+const MAINTENANCE_FLAGS = ['--prepare-update', '--prepare-uninstall', '--maintenance', '--squirrel-uninstall', '--squirrel-obsolete', '--squirrel-updated'];
+
+function detectMaintenanceFlag(argv: string[]): string | null {
+    const normalized = argv.map(arg => String(arg || '').toLowerCase());
+    for (const flag of MAINTENANCE_FLAGS) {
+        if (normalized.includes(flag)) {
+            return flag;
+        }
+    }
+    return null;
+}
+
+const startupMaintenanceFlag = detectMaintenanceFlag(process.argv);
+maintenanceRequested = startupMaintenanceFlag !== null;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+    app.exit(0);
+}
+
+function normalizeApiBaseUrl(rawUrl: string): string {
+    const cleaned = String(rawUrl || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+    if (!cleaned) {
+        throw new Error('API URL bo\'sh bo\'lishi mumkin emas');
+    }
+
+    const withScheme = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+    let parsed: URL;
+    try {
+        parsed = new URL(withScheme);
+    } catch {
+        throw new Error('API URL noto\'g\'ri formatda');
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error('Faqat HTTP/HTTPS URL ruxsat etiladi');
+    }
+
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${normalizedPath}`.replace(/\/+$/, '');
+}
+
+async function probeHealth(base: string): Promise<void> {
+    const requestConfig: { timeout: number; httpsAgent?: https.Agent } = { timeout: 5000 };
+    if (config.ALLOW_INSECURE_TLS && base.startsWith('https://')) {
+        requestConfig.httpsAgent = insecureHttpsAgent;
+    }
+    await axios.get(`${base}/api/health`, requestConfig);
+}
 
 function clearSyncInterval() {
     if (!syncInterval) return;
@@ -83,6 +127,38 @@ function requestAppExit(reason: string, options: { relaunch?: boolean; forceMs?:
     app.quit();
 }
 
+function disableAutoStart() {
+    if (process.platform !== 'win32' && process.platform !== 'darwin') {
+        return;
+    }
+    try {
+        app.setLoginItemSettings({
+            openAtLogin: false,
+            path: app.getPath('exe')
+        });
+        logger.info('🛠️ [MAINT] Auto-start disabled for maintenance/update.');
+    } catch (err) {
+        logger.warn(`⚠️ [MAINT] Failed to disable auto-start: ${err}`);
+    }
+}
+
+function requestMaintenanceMode(reason: string) {
+    maintenanceRequested = true;
+    logger.info(`🛠️ [MAINT] Requested: ${reason}`);
+
+    if (app.isReady()) {
+        disableAutoStart();
+    } else {
+        app.once('ready', () => disableAutoStart());
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.hide();
+    }
+
+    requestAppExit(`Maintenance mode: ${reason}`, { forceMs: 3000 });
+}
+
 function isAdminQuitShortcut(input: Electron.Input): boolean {
     const key = String(input.key || '').toLowerCase();
     return (input.control || input.meta) && input.shift && (key === 'q' || key === 'f4');
@@ -108,7 +184,26 @@ function handleFactoryReset() {
     }
 }
 
+app.on('second-instance', (_event, argv) => {
+    const maintenanceFlag = detectMaintenanceFlag(argv || []);
+    if (maintenanceFlag) {
+        requestMaintenanceMode(`second-instance ${maintenanceFlag}`);
+        return;
+    }
+
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) {
+            mainWindow.restore();
+        }
+        mainWindow.focus();
+    }
+});
+
 function handleAdminShortcut(input: Electron.Input): boolean {
+    if (!config.ADMIN_SHORTCUTS_ENABLED) {
+        return false;
+    }
+
     if (isAdminQuitShortcut(input)) {
         logger.info('🚪 [QUIT] Admin quit triggered by Ctrl+Shift+F4/Ctrl+Shift+Q');
         requestAppExit('Admin quit shortcut');
@@ -124,6 +219,11 @@ function handleAdminShortcut(input: Electron.Input): boolean {
 }
 
 function registerAdminGlobalShortcuts() {
+    if (!config.ADMIN_SHORTCUTS_ENABLED) {
+        logger.info('🔒 [QUIT] Admin shortcuts are disabled by config');
+        return;
+    }
+
     const adminQuitShortcuts = ['CommandOrControl+Shift+F4', 'CommandOrControl+Shift+Q'];
     for (const shortcut of adminQuitShortcuts) {
         const ok = globalShortcut.register(shortcut, () => {
@@ -231,7 +331,7 @@ async function initialize() {
         database = new Database(userDataPath);
         await database.init(); // Initialize sql.js
 
-        apiSync = new ApiSync(config.API_URL, database);
+        apiSync = new ApiSync(config.API_URL, database, config.ALLOW_INSECURE_TLS);
 
         // Start initial sync
         apiSync.syncAll().catch(err => {
@@ -258,33 +358,47 @@ async function initialize() {
         logger.app.ready();
     } catch (error) {
         logger.app.error('Initialization failed', error);
+        throw error;
     }
 }
 
 app.whenReady().then(async () => {
-    // 24/7 Kiosk features: Prevent Sleep and start on boot
-    if (config.KIOSK_MODE) {
-        sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
-        try {
-            app.setLoginItemSettings({
-                openAtLogin: true,
-                path: app.getPath('exe')
-            });
-            logger.info('🛡️ [SYSTEM] Auto-start on boot enabled.');
-        } catch (e) {
-            logger.warn('⚠️ [SYSTEM] Could not set auto-start. Run as admin if necessary.');
+    try {
+        if (maintenanceRequested) {
+            requestMaintenanceMode(`startup ${startupMaintenanceFlag || '--maintenance'}`);
+            return;
         }
+
+        // 24/7 Kiosk features: Prevent Sleep and start on boot
+        if (config.KIOSK_MODE) {
+            sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+            try {
+                app.setLoginItemSettings({
+                    openAtLogin: true,
+                    path: app.getPath('exe')
+                });
+                logger.info('🛡️ [SYSTEM] Auto-start on boot enabled.');
+            } catch (e) {
+                logger.warn('⚠️ [SYSTEM] Could not set auto-start. Run as admin if necessary.');
+            }
+        }
+
+        registerAdminGlobalShortcuts();
+        await initialize();
+        createWindow();
+
+        app.on('activate', () => {
+            if (BrowserWindow.getAllWindows().length === 0) {
+                if (maintenanceRequested) return;
+                createWindow();
+            }
+        });
+    } catch (error: any) {
+        logger.app.error('Fatal startup error', error);
+        const message = error?.message || String(error || 'Unknown error');
+        dialog.showErrorBox('University Kiosk startup error', message);
+        app.exit(1);
     }
-
-    registerAdminGlobalShortcuts();
-    await initialize();
-    createWindow();
-
-    app.on('activate', () => {
-        if (BrowserWindow.getAllWindows().length === 0) {
-            createWindow();
-        }
-    });
 });
 
 app.on('window-all-closed', () => {
@@ -310,7 +424,7 @@ app.on('will-quit', () => {
 // Setup Wizard Handlers
 ipcMain.handle('setup-check-connection', async (_, url: string) => {
     try {
-        const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+        const base = normalizeApiBaseUrl(url);
         await probeHealth(base);
         return true;
     } catch (err) {
@@ -322,12 +436,15 @@ ipcMain.handle('setup-check-connection', async (_, url: string) => {
 
 ipcMain.handle('setup-fetch-kiosks', async (_, url: string) => {
     try {
-        const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
-        const client = axios.create({
+        const base = normalizeApiBaseUrl(url);
+        const clientConfig: { baseURL: string; timeout: number; httpsAgent?: https.Agent } = {
             baseURL: base,
-            timeout: 10000,
-            httpsAgent: new https.Agent({ rejectUnauthorized: false })
-        });
+            timeout: 10000
+        };
+        if (config.ALLOW_INSECURE_TLS && base.startsWith('https://')) {
+            clientConfig.httpsAgent = insecureHttpsAgent;
+        }
+        const client = axios.create(clientConfig);
         const res = await client.get('/api/kiosks/');
         return res.data;
     } catch (err: any) {
@@ -337,7 +454,7 @@ ipcMain.handle('setup-fetch-kiosks', async (_, url: string) => {
 });
 
 ipcMain.handle('setup-save-config', async (_, apiUrl: string, kioskId: number, kioskMode: boolean, autoFullscreen: boolean, idleTimeout: number, animationLoops: number, debugMode: boolean) => {
-    const normalizedUrl = String(apiUrl || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+    const normalizedUrl = normalizeApiBaseUrl(apiUrl);
     const safeIdleTimeout = Number.isFinite(idleTimeout) && idleTimeout > 0 ? idleTimeout : getConfig().IDLE_TIMEOUT_MS;
     const safeAnimationLoops = Number.isFinite(animationLoops) && animationLoops > 0 ? animationLoops : getConfig().ANIMATION_LOOPS;
     const safeKioskId = Number.isFinite(kioskId) && kioskId > 0 ? kioskId : getConfig().KIOSK_ID;
@@ -356,6 +473,11 @@ ipcMain.handle('setup-save-config', async (_, apiUrl: string, kioskId: number, k
         SETUP_COMPLETED: true
     });
     requestAppExit('Setup saved, relaunching app', { relaunch: true });
+});
+
+ipcMain.handle('prepare-maintenance', async (_event, mode: string = 'manual') => {
+    requestMaintenanceMode(`ipc ${mode}`);
+    return { success: true };
 });
 
 // Get all kiosks

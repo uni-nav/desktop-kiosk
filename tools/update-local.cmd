@@ -22,7 +22,7 @@ if not defined SETUP_FILE (
 echo Using setup: %SETUP_FILE%
 echo Log file: %LOG_FILE%
 echo ===== %DATE% %TIME% ===== > "%LOG_FILE%"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%update-client.ps1" -LocalSetupPath "%SCRIPT_DIR%%SETUP_FILE%" >> "%LOG_FILE%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%update-client.ps1" -LocalSetupPath "%SCRIPT_DIR%%SETUP_FILE%" %* >> "%LOG_FILE%" 2>&1
 set "RC=%ERRORLEVEL%"
 echo.
 echo ===== RESULT (exit code %RC%) =====

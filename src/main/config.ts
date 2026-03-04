@@ -9,7 +9,7 @@ const normalizeApiUrl = (raw: string): string => {
     if (!trimmed) return defaults.API_URL;
     let url = trimmed;
     if (!/^https?:\/\//i.test(url)) {
-        url = `http://${url}`;
+        url = `https://${url}`;
     }
     url = url.replace(/\/+$/, '');
     url = url.replace(/\/api$/i, '');
@@ -37,7 +37,9 @@ const defaults = {
     IDLE_TIMEOUT_MS: '300000', // 5 minutes
     ANIMATION_LOOPS: '3',
     DEBUG_MODE: 'false',
-    SETUP_COMPLETED: 'false'
+    SETUP_COMPLETED: 'false',
+    ALLOW_INSECURE_TLS: 'false',
+    ADMIN_SHORTCUTS_ENABLED: 'false'
 };
 
 interface Config {
@@ -49,6 +51,8 @@ interface Config {
     ANIMATION_LOOPS: number;
     DEBUG_MODE: boolean;
     SETUP_COMPLETED: boolean;
+    ALLOW_INSECURE_TLS: boolean;
+    ADMIN_SHORTCUTS_ENABLED: boolean;
 }
 
 let config: Config | null = null;
@@ -106,7 +110,9 @@ export function loadConfig(): Config {
         IDLE_TIMEOUT_MS: parseIntOrDefault(values.IDLE_TIMEOUT_MS, parseIntOrDefault(defaults.IDLE_TIMEOUT_MS, 300000)),
         ANIMATION_LOOPS: parseIntOrDefault(values.ANIMATION_LOOPS, parseIntOrDefault(defaults.ANIMATION_LOOPS, 3)),
         DEBUG_MODE: parseBool(values.DEBUG_MODE, defaults.DEBUG_MODE === 'true'),
-        SETUP_COMPLETED: parseBool(values.SETUP_COMPLETED, defaults.SETUP_COMPLETED === 'true')
+        SETUP_COMPLETED: parseBool(values.SETUP_COMPLETED, defaults.SETUP_COMPLETED === 'true'),
+        ALLOW_INSECURE_TLS: parseBool(values.ALLOW_INSECURE_TLS, defaults.ALLOW_INSECURE_TLS === 'true'),
+        ADMIN_SHORTCUTS_ENABLED: parseBool(values.ADMIN_SHORTCUTS_ENABLED, defaults.ADMIN_SHORTCUTS_ENABLED === 'true')
     };
 
     const env = process.env.NODE_ENV || 'development';

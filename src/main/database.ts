@@ -365,7 +365,8 @@ export class Database {
         this.db.run(`
             DELETE FROM connections 
             WHERE from_waypoint_id IN (SELECT id FROM waypoints WHERE floor_id = ?)
-        `, [floorId]);
+               OR to_waypoint_id IN (SELECT id FROM waypoints WHERE floor_id = ?)
+        `, [floorId, floorId]);
         this.save();
     }
 
